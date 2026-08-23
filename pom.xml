@@ -37,7 +37,7 @@
 
         <!-- Protobuf -->
         <protobuf.version>4.28.2</protobuf.version>
-        <protobuf-plugin.version>0.6.1</protobuf-plugin.version>
+        <protobuf-plugin.version>5.1.2</protobuf-plugin.version>
 
         <!-- Redis -->
         <jedis.version>5.1.5</jedis.version>
