@@ -1,0 +1,97 @@
+version: "3.9"
+
+services:
+  # ── Redis 7.4 (spatial indexing + track state) ──────────────────
+  redis:
+    image: redis:7.4-alpine
+    container_name: vanguard-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # ── Kafka 3.7 (KRaft, no Zookeeper) ────────────────────────────
+  kafka:
+    image: apache/kafka:3.7.1
+    container_name: vanguard-kafka
+    ports:
+      - "9092:9092"
+      - "9093:9093"
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_LOG_DIRS: /tmp/kraft-combined-logs
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      CLUSTER_ID: "VanGuardXCluster000001"
+    volumes:
+      - kafka-data:/tmp/kraft-combined-logs
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 > /dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+
+  # ── Kafka topic init ────────────────────────────────────────────
+  kafka-init:
+    image: apache/kafka:3.7.1
+    container_name: vanguard-kafka-init
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command: |
+      "
+      echo 'Creating topics...'
+      /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic raw-tracks     --partitions 3 --replication-factor 1
+      /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic filtered-tracks --partitions 3 --replication-factor 1
+      /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic alerts         --partitions 1 --replication-factor 1
+      echo 'Done:'
+      /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --list
+      "
+
+  # ── Prometheus (metrics scraping) ───────────────────────────────
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    container_name: vanguard-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./docker/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    profiles:
+      - monitoring
+
+  # ── PostGIS (historical persistence, Week 4) ────────────────────
+  postgis:
+    image: postgis/postgis:16-3.4-alpine
+    container_name: vanguard-postgis
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: vanguard
+      POSTGRES_USER: vanguard
+      POSTGRES_PASSWORD: vanguard_dev
+    volumes:
+      - postgis-data:/var/lib/postgresql/data
+    profiles:
+      - persistence
+
+volumes:
+  redis-data:
+  kafka-data:
+  postgis-data:

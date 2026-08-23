@@ -1,0 +1,43 @@
+# Build output
+target/
+build/
+*.class
+*.jar
+*.war
+
+# IDE
+.idea/
+*.iml
+.vscode/
+.settings/
+.project
+.classpath
+*.swp
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Generated Protobuf
+**/generated-sources/
+**/generated-test-sources/
+
+# Docker volumes
+docker/data/
+
+# Environment
+.env
+.env.local
+
+# Node (vanguard-ui)
+vanguard-ui/node_modules/
+vanguard-ui/dist/
+vanguard-ui/.vite/
+
+# Logs
+*.log
+logs/
+
+# Redis dump
+dump.rdb
