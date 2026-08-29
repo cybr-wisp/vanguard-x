@@ -1,0 +1,38 @@
+
+# Maven
+target/
+*.jar
+*.war
+*.class
+dependency-reduced-pom.xml
+
+# IDE
+.idea/
+*.iml
+.vscode/
+.settings/
+.project
+.classpath
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Node (vanguard-ui)
+node_modules/
+dist/
+.env
+.env.local
+
+# Logs
+*.log
+logs/
+
+# Docker
+.env.docker
+
+# Gradle (just in case)
+.gradle/
+build/
