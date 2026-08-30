@@ -1,0 +1,38 @@
+name: SBOM
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  generate-sbom:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: maven
+
+      - name: Generate CycloneDX SBOM
+        run: mvn -B -DskipTests validate org.cyclonedx:cyclonedx-maven-plugin:makeAggregateBom
+
+      - name: Upload SBOM
+        uses: actions/upload-artifact@v4
+        with:
+          name: vanguard-x-sbom
+          path: |
+            target/bom.json
+            target/bom.xml
+          if-no-files-found: error

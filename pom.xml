@@ -151,6 +151,11 @@
                 <artifactId>vanguard-spatial</artifactId>
                 <version>${project.version}</version>
             </dependency>
+            <dependency>
+                <groupId>com.vanguard</groupId>
+                <artifactId>vanguard-api</artifactId>
+                <version>${project.version}</version>
+            </dependency>
         </dependencies>
     </dependencyManagement>
 
