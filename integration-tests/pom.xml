@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+                             https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.vanguard</groupId>
+        <artifactId>vanguard-parent</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>integration-tests</artifactId>
+    <description>End-to-end integration tests for the full pipeline</description>
+
+    <dependencies>
+        <dependency>
+            <groupId>com.vanguard</groupId>
+            <artifactId>vanguard-simulator</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.vanguard</groupId>
+            <artifactId>vanguard-gateway</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.vanguard</groupId>
+            <artifactId>vanguard-tracking</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.vanguard</groupId>
+            <artifactId>vanguard-spatial</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.vanguard</groupId>
+            <artifactId>vanguard-api</artifactId>
+        </dependency>
+    </dependencies>
+</project>
