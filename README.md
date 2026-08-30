@@ -1,6 +1,6 @@
 # VANGUARD-X
 
-[![CI](https://github.com/cybr-wisp/vanguard-x/actions/workflows/ci.yml/badge.svg)](https://github.com/cybr-wisp/vanguard-x/actions/workflows/ci.yml)
+[![CI](https://github.com/cybr-wisp/vanguard-x/actions/workflows/ci.yml/badge.svg?branch=main&event=push)](https://github.com/cybr-wisp/vanguard-x/actions/workflows/ci.yml)
 [![Java](https://img.shields.io/badge/Java-21-ED8B00?logo=openjdk&logoColor=white)](https://openjdk.org/projects/jdk/21/)
 [![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.3-6DB33F?logo=springboot&logoColor=white)](https://spring.io/projects/spring-boot)
 [![Kafka](https://img.shields.io/badge/Kafka-KRaft-231F20?logo=apachekafka&logoColor=white)](https://kafka.apache.org/)
