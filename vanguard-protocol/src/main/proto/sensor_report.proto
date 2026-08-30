@@ -6,12 +6,17 @@ option java_outer_classname = "SensorReportProto";
 
 message SensorReport {
     string sensor_id = 1;
-    string target_id = 2;
-    int64 timestamp_ms = 3;
-    double x = 4;
-    double y = 5;
-    double vx = 6;
-    double vy = 7;
-    double signal_strength = 8;
-    int64 sequence_number = 9;
+    int64 timestamp_ms = 2;
+
+    // sensor position (known, fixed)
+    double sensor_x = 3;
+    double sensor_y = 4;
+
+    // raw radar observation in polar coordinates (noisy)
+    double range = 5;
+    double azimuth = 6;
+
+    // observation quality
+    double signal_strength = 7;
+    int64 sequence_number = 8;
 }
