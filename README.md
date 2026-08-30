@@ -15,7 +15,7 @@
 
 ## Architecture
 
-![VANGUARD-X Architecture](docs/architecture/architecture.png)
+![VANGUARD-X Architecture](docs/architecture/architecture-v1.png)
 
 Simulated radar stations produce noisy polar observations `[range, azimuth]` over UDP. A Netty gateway decodes, validates, and sequence-tracks each packet before committing it to Kafka. The tracking processor runs data association and an Extended Kalman Filter to fuse observations into smooth Cartesian state estimates `[x, y, vx, vy]` with covariance. A spatial engine evaluates fused tracks against geofence polygons and publishes boundary-crossing alerts. A Spring Boot API serves fused tracks and alerts over REST and WebSocket to a browser-based tactical map.
 
