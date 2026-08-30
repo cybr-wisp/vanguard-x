@@ -1,0 +1,24 @@
+syntax = "proto3";
+package vanguard;
+
+option java_package = "com.vanguard.protocol";
+option java_outer_classname = "TrackEventProto";
+
+message TrackEvent {
+    string event_id = 1;
+    string track_id = 2;
+    string geofence_id = 3;
+    int64 timestamp_ms = 4;
+
+    // position at the moment of the event
+    double x = 5;
+    double y = 6;
+
+    EventType type = 7;
+
+    enum EventType {
+        ENTERED = 0;
+        EXITED = 1;
+        LOITERING = 2;
+    }
+}

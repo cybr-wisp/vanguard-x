@@ -1,0 +1,17 @@
+syntax = "proto3";
+package vanguard;
+
+option java_package = "com.vanguard.protocol";
+option java_outer_classname = "SensorReportProto";
+
+message SensorReport {
+    string sensor_id = 1;
+    string target_id = 2;
+    int64 timestamp_ms = 3;
+    double x = 4;
+    double y = 5;
+    double vx = 6;
+    double vy = 7;
+    double signal_strength = 8;
+    int64 sequence_number = 9;
+}
