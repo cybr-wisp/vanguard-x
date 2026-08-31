@@ -1,8 +1,12 @@
 package com.vanguard.tracking.evaluation;
 
-import com.vanguard.tracking.lifecycle.Track;
-
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 /**
  * Evaluates tracking quality by matching canonical tracks back to hidden
@@ -97,8 +101,13 @@ public class TrackingEvaluator {
      * Compute all evaluation metrics from recorded samples.
      */
     public EvaluationResult evaluate() {
+        // Association accuracy (computed before early return so it's available
+        // even when no position/velocity samples have been recorded)
+        double assocAcc = totalAssociations > 0
+                ? (double) correctAssociations / totalAssociations : 0;
+
         if (samples.isEmpty()) {
-            return new EvaluationResult(0, 0, 0, 0, 0, 0, 0, 0);
+            return new EvaluationResult(0, 0, assocAcc, 0, 0, 0, 0, 0);
         }
 
         // Position and velocity RMSE
@@ -111,10 +120,6 @@ public class TrackingEvaluator {
         }
         double posRmse = Math.sqrt(sumPosErr2 / samples.size());
         double velRmse = Math.sqrt(sumVelErr2 / samples.size());
-
-        // Association accuracy
-        double assocAcc = totalAssociations > 0
-                ? (double) correctAssociations / totalAssociations : 0;
 
         // Track fragmentation: count of truth targets mapped to >1 canonical track
         Map<String, Set<String>> truthToTracks = new HashMap<>();

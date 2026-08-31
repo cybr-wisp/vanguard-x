@@ -35,7 +35,7 @@ public class RestrictedZone {
         GeometryFactory gf = polygon.getFactory();
         Point point = gf.createPoint(new Coordinate(px, py));
 
-        if (polygon.contains(point)) return ZoneClassification.BREACH;
+        if (polygon.covers(point)) return ZoneClassification.BREACH;
         if (warningBuffer.contains(point)) return ZoneClassification.WARNING;
         if (advisoryBuffer.contains(point)) return ZoneClassification.ADVISORY;
         return ZoneClassification.CLEAR;
