@@ -87,8 +87,7 @@ public class TrackingPipelineConsumer implements Runnable {
 
                 // Delegate to the tracking processor
                 List<KeyValue> output = processor.process(
-                        records.records(INPUT_TOPIC).stream().toList());
-
+                        java.util.stream.StreamSupport.stream(records.records(INPUT_TOPIC).spliterator(), false).toList());
                 // Publish fused tracks
                 for (KeyValue kv : output) {
                     producer.send(new ProducerRecord<>(OUTPUT_TOPIC, kv.key(), kv.value()),
