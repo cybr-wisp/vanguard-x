@@ -79,8 +79,7 @@ public class SpatialPipelineConsumer implements Runnable {
                 consumed.add(records.count());
 
                 List<KeyValue> events = evaluator.evaluate(
-                        records.records(INPUT_TOPIC).stream().toList());
-
+                     java.util.stream.StreamSupport.stream(records.records(INPUT_TOPIC).spliterator(), false).toList());
                 for (KeyValue kv : events) {
                     producer.send(new ProducerRecord<>(OUTPUT_TOPIC, kv.key(), kv.value()),
                             (metadata, ex) -> {
