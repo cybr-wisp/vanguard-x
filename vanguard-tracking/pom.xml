@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="UTF-8"?>
+﻿<?xml version="1.0" encoding="UTF-8"?>
 <project xmlns="http://maven.apache.org/POM/4.0.0"
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
@@ -12,31 +12,26 @@
     </parent>
 
     <artifactId>vanguard-tracking</artifactId>
-<<<<<<< HEAD
-    <description>Extended Kalman Filter tracking engine with data association</description>
-=======
     <description>EKF-based multi-sensor track estimation, association, and lifecycle</description>
->>>>>>> 8cbd51c (feat(tracking): EKF predict/update with EJML matrix primitives)
 
     <dependencies>
         <dependency>
             <groupId>com.vanguard</groupId>
             <artifactId>vanguard-protocol</artifactId>
         </dependency>
-<<<<<<< HEAD
+
         <dependency>
             <groupId>org.apache.kafka</groupId>
             <artifactId>kafka-clients</artifactId>
         </dependency>
-    </dependencies>
-</project>
-=======
+
         <!-- EJML for matrix primitives only; no imported tracking framework -->
         <dependency>
             <groupId>org.ejml</groupId>
             <artifactId>ejml-simple</artifactId>
             <version>0.43.1</version>
         </dependency>
+
         <dependency>
             <groupId>ch.qos.logback</groupId>
             <artifactId>logback-classic</artifactId>
@@ -44,4 +39,3 @@
         </dependency>
     </dependencies>
 </project>
->>>>>>> 8cbd51c (feat(tracking): EKF predict/update with EJML matrix primitives)
