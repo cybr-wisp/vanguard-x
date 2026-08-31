@@ -23,6 +23,7 @@
         <module>vanguard-spatial</module>
         <module>vanguard-api</module>
         <module>integration-tests</module>
+        <module>benchmarks</module>
     </modules>
 
     <!-- ── Global properties ── -->
