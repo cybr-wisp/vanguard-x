@@ -19,11 +19,14 @@
             <groupId>com.vanguard</groupId>
             <artifactId>vanguard-protocol</artifactId>
         </dependency>
-        <!-- JTS Topology Suite for geometry operations -->
         <dependency>
             <groupId>org.locationtech.jts</groupId>
             <artifactId>jts-core</artifactId>
             <version>1.19.0</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.kafka</groupId>
+            <artifactId>kafka-clients</artifactId>
         </dependency>
         <dependency>
             <groupId>ch.qos.logback</groupId>
