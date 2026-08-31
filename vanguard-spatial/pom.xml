@@ -12,16 +12,23 @@
     </parent>
 
     <artifactId>vanguard-spatial</artifactId>
-    <description>Geofence engine with point-in-polygon evaluation and alert state machine</description>
+    <description>Geofence evaluation, boundary distance, and stateful alert events</description>
 
     <dependencies>
         <dependency>
             <groupId>com.vanguard</groupId>
-            <artifactId>vanguard-tracking</artifactId>
+            <artifactId>vanguard-protocol</artifactId>
+        </dependency>
+        <!-- JTS Topology Suite for geometry operations -->
+        <dependency>
+            <groupId>org.locationtech.jts</groupId>
+            <artifactId>jts-core</artifactId>
+            <version>1.19.0</version>
         </dependency>
         <dependency>
-            <groupId>org.apache.kafka</groupId>
-            <artifactId>kafka-clients</artifactId>
+            <groupId>ch.qos.logback</groupId>
+            <artifactId>logback-classic</artifactId>
+            <scope>runtime</scope>
         </dependency>
     </dependencies>
 </project>
