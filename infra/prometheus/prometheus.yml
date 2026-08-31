@@ -1,0 +1,11 @@
+global:
+  scrape_interval: 5s
+  evaluation_interval: 5s
+
+scrape_configs:
+  - job_name: 'vanguard-api'
+    metrics_path: '/actuator/prometheus'
+    static_configs:
+      - targets: ['vanguard-api:8080']
+        labels:
+          service: 'vanguard-api'

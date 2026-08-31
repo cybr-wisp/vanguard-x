@@ -1,0 +1,98 @@
+{
+  "dashboard": {
+    "title": "Vanguard Operational Dashboard",
+    "uid": "vanguard-ops",
+    "timezone": "browser",
+    "refresh": "5s",
+    "panels": [
+      {
+        "title": "Gateway Throughput (reports/sec)",
+        "type": "timeseries",
+        "gridPos": { "x": 0, "y": 0, "w": 8, "h": 6 },
+        "targets": [
+          { "expr": "rate(vanguard_gateway_packets_accepted_total[30s])", "legendFormat": "accepted/s" },
+          { "expr": "rate(vanguard_gateway_packets_dropped_total[30s])", "legendFormat": "dropped/s" }
+        ]
+      },
+      {
+        "title": "Processing Latency (p50/p95/p99)",
+        "type": "timeseries",
+        "gridPos": { "x": 8, "y": 0, "w": 8, "h": 6 },
+        "targets": [
+          { "expr": "histogram_quantile(0.50, rate(vanguard_tracking_processing_latency_seconds_bucket[1m]))", "legendFormat": "p50" },
+          { "expr": "histogram_quantile(0.95, rate(vanguard_tracking_processing_latency_seconds_bucket[1m]))", "legendFormat": "p95" },
+          { "expr": "histogram_quantile(0.99, rate(vanguard_tracking_processing_latency_seconds_bucket[1m]))", "legendFormat": "p99" }
+        ]
+      },
+      {
+        "title": "End-to-End Latency (p50/p95/p99)",
+        "type": "timeseries",
+        "gridPos": { "x": 16, "y": 0, "w": 8, "h": 6 },
+        "targets": [
+          { "expr": "histogram_quantile(0.50, rate(vanguard_pipeline_e2e_latency_seconds_bucket[1m]))", "legendFormat": "p50" },
+          { "expr": "histogram_quantile(0.95, rate(vanguard_pipeline_e2e_latency_seconds_bucket[1m]))", "legendFormat": "p95" },
+          { "expr": "histogram_quantile(0.99, rate(vanguard_pipeline_e2e_latency_seconds_bucket[1m]))", "legendFormat": "p99" }
+        ]
+      },
+      {
+        "title": "Active Tracks",
+        "type": "stat",
+        "gridPos": { "x": 0, "y": 6, "w": 4, "h": 4 },
+        "targets": [
+          { "expr": "vanguard_tracking_tracks_active", "legendFormat": "active" }
+        ]
+      },
+      {
+        "title": "Track States",
+        "type": "timeseries",
+        "gridPos": { "x": 4, "y": 6, "w": 8, "h": 4 },
+        "targets": [
+          { "expr": "vanguard_tracking_tracks_confirmed", "legendFormat": "confirmed" },
+          { "expr": "vanguard_tracking_tracks_coasting", "legendFormat": "coasting" }
+        ]
+      },
+      {
+        "title": "Queue Depth",
+        "type": "timeseries",
+        "gridPos": { "x": 12, "y": 6, "w": 6, "h": 4 },
+        "targets": [
+          { "expr": "vanguard_pipeline_queue_depth", "legendFormat": "depth" }
+        ]
+      },
+      {
+        "title": "Kafka Consumer Lag",
+        "type": "timeseries",
+        "gridPos": { "x": 18, "y": 6, "w": 6, "h": 4 },
+        "targets": [
+          { "expr": "vanguard_pipeline_kafka_consumer_lag", "legendFormat": "lag" }
+        ]
+      },
+      {
+        "title": "Packet Drops & Malformed",
+        "type": "timeseries",
+        "gridPos": { "x": 0, "y": 10, "w": 8, "h": 4 },
+        "targets": [
+          { "expr": "rate(vanguard_gateway_packets_dropped_total[30s])", "legendFormat": "drops/s" },
+          { "expr": "rate(vanguard_gateway_packets_malformed_total[30s])", "legendFormat": "malformed/s" },
+          { "expr": "rate(vanguard_gateway_packets_duplicate_total[30s])", "legendFormat": "dups/s" }
+        ]
+      },
+      {
+        "title": "Association Success Rate",
+        "type": "timeseries",
+        "gridPos": { "x": 8, "y": 10, "w": 8, "h": 4 },
+        "targets": [
+          { "expr": "rate(vanguard_tracking_association_successes_total[1m]) / rate(vanguard_tracking_association_attempts_total[1m])", "legendFormat": "success rate" }
+        ]
+      },
+      {
+        "title": "Zone Events",
+        "type": "timeseries",
+        "gridPos": { "x": 16, "y": 10, "w": 8, "h": 4 },
+        "targets": [
+          { "expr": "rate(vanguard_spatial_zone_events_total[1m])", "legendFormat": "events/min" }
+        ]
+      }
+    ]
+  }
+}
