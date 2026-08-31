@@ -1,0 +1,77 @@
+# Vanguard Reference Scenario
+# 22 deterministic targets, 3 sensors, network impairments enabled
+# Seed: 42 -- identical runs produce identical output
+#
+# To use: ScenarioLoader.referenceScenario() builds this programmatically.
+# YAML loading via Jackson ObjectMapper is a future enhancement.
+
+name: reference-22-targets
+seed: 42
+scenario_duration_ms: 120000
+
+sensors:
+  - sensor_id: SENSOR-ALPHA
+    sx: -2000.0
+    sy: 0.0
+    sigma_range_m: 50.0
+    sigma_bearing_rad: 0.010
+    bias_range_m: 5.0
+    bias_bearing_rad: 0.002
+    report_interval_ms: 100
+    false_detection_rate: 0.01
+
+  - sensor_id: SENSOR-BRAVO
+    sx: 2000.0
+    sy: -1500.0
+    sigma_range_m: 75.0
+    sigma_bearing_rad: 0.015
+    bias_range_m: -3.0
+    bias_bearing_rad: 0.001
+    report_interval_ms: 100
+    false_detection_rate: 0.02
+
+  - sensor_id: SENSOR-CHARLIE
+    sx: 0.0
+    sy: 2500.0
+    sigma_range_m: 60.0
+    sigma_bearing_rad: 0.012
+    bias_range_m: 2.0
+    bias_bearing_rad: -0.001
+    report_interval_ms: 100
+    false_detection_rate: 0.015
+
+impairments:
+  enabled: true
+  packet_loss_rate: 0.02
+  duplication_rate: 0.01
+  jitter_std_dev_ms: 50
+  reorder_window_ms: 200
+
+# Target groups:
+#   N01-N05  north-south corridor, straight + accel
+#   T01-T05  turning targets, S-curves
+#   F01-F05  fast movers, accel + turn combos
+#   S01-S04  slow converging (association stress)
+#   L01-L03  late arrivals (staggered start)
+
+targets:
+  # --- Group 1: North-south corridor ---
+  - id: TGT-N01
+    start_ms: 0
+    px0: -1746.3
+    py0: -3000.0
+    vx0: 22.8
+    vy0: 2.1
+    segments:
+      - type: STRAIGHT
+        duration_sec: 40
+      - type: ACCELERATE
+        duration_sec: 10
+        ax: 2.0
+        ay: 0.0
+      - type: STRAIGHT
+        duration_sec: 70
+
+  # (remaining 21 targets follow the same pattern)
+  # Generated programmatically by ScenarioLoader.referenceScenario()
+  # This file documents the schema; the canonical source is the Java code.
