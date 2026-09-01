@@ -15,8 +15,9 @@ services:
     environment:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
     ports:
       - "9092:9092"
 
@@ -24,15 +25,6 @@ services:
     image: redis:7.2-alpine
     ports:
       - "6379:6379"
-
-  postgres:
-    image: postgis/postgis:16-3.4-alpine
-    environment:
-      POSTGRES_DB: vanguard
-      POSTGRES_USER: vanguard
-      POSTGRES_PASSWORD: vanguard
-    ports:
-      - "5432:5432"
 
   prometheus:
     image: prom/prometheus:v2.53.0
@@ -48,4 +40,4 @@ services:
     environment:
       GF_SECURITY_ADMIN_PASSWORD: vanguard
     ports:
-      - "3000:3000"
+      - "3001:3000"
