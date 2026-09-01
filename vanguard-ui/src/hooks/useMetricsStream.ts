@@ -1,49 +1,52 @@
 import { useEffect, useState } from 'react';
 import type { SystemMetrics } from '../lib/types';
 
-const WS_HEALTH_URL = `ws://${window.location.hostname}:8080/ws/health`;
-const RECONNECT_DELAY_MS = 3000;
+const WS_HOST = `ws://${window.location.hostname}:8081`;
 
-/**
- * WebSocket hook for system health metrics. Updates are typically pushed
- * every 1-2 seconds from the backend, so no client-side throttling is needed.
- */
+let globalMetrics: SystemMetrics | null = null;
+let globalConnected = false;
+let listeners: Array<() => void> = [];
+let started = false;
+
+function notify() {
+  listeners.forEach(fn => fn());
+}
+
+function startHealthSocket() {
+  if (started) return;
+  started = true;
+
+  function connect() {
+    const ws = new WebSocket(`${WS_HOST}/ws/health`);
+    ws.onopen = () => { globalConnected = true; notify(); };
+    ws.onmessage = (msg) => {
+      try {
+        globalMetrics = JSON.parse(msg.data);
+        notify();
+      } catch (e) {}
+    };
+    ws.onclose = () => {
+      globalConnected = false;
+      notify();
+      setTimeout(connect, 3000);
+    };
+    ws.onerror = () => ws.close();
+  }
+
+  connect();
+}
+
 export function useMetricsStream() {
-  const [metrics, setMetrics] = useState<SystemMetrics | null>(null);
-  const [connected, setConnected] = useState(false);
+  const [, forceUpdate] = useState(0);
 
   useEffect(() => {
-    let ws: WebSocket | null = null;
-    let reconnectTimer: number | null = null;
-
-    function connect() {
-      ws = new WebSocket(WS_HEALTH_URL);
-
-      ws.onopen = () => setConnected(true);
-
-      ws.onmessage = (msg) => {
-        try {
-          setMetrics(JSON.parse(msg.data));
-        } catch (e) {
-          console.warn('Invalid metrics message:', e);
-        }
-      };
-
-      ws.onclose = () => {
-        setConnected(false);
-        reconnectTimer = window.setTimeout(connect, RECONNECT_DELAY_MS);
-      };
-
-      ws.onerror = () => ws?.close();
-    }
-
-    connect();
-
+    startHealthSocket();
+    const listener = () => forceUpdate(n => n + 1);
+    listeners.push(listener);
     return () => {
-      ws?.close();
-      if (reconnectTimer) clearTimeout(reconnectTimer);
+      listeners = listeners.filter(l => l !== listener);
     };
   }, []);
 
-  return { metrics, connected };
+  return { metrics: globalMetrics, connected: globalConnected };
 }

@@ -1,133 +1,79 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useState } from 'react';
 import type { FusedTrack, TrackEvent } from '../lib/types';
 
-const WS_TRACKS_URL = `ws://${window.location.hostname}:8080/ws/tracks`;
-const WS_EVENTS_URL = `ws://${window.location.hostname}:8080/ws/events`;
-const RECONNECT_DELAY_MS = 2000;
-const THROTTLE_INTERVAL_MS = 60; // ~16 FPS visual update rate
+const WS_HOST = `ws://${window.location.hostname}:8081`;
 
-interface TrackStreamState {
-  tracks: Map<string, FusedTrack>;
-  events: TrackEvent[];
-  connected: boolean;
-  lastUpdateMs: number;
+// Module-level singleton state -- survives React re-renders and HMR
+let globalTracks = new Map<string, FusedTrack>();
+let globalEvents: TrackEvent[] = [];
+let globalConnected = false;
+let listeners: Array<() => void> = [];
+let started = false;
+
+function notify() {
+  listeners.forEach(fn => fn());
 }
 
-/**
- * WebSocket hook for live track and event streaming. Maintains client-side
- * canonical state and throttles visual updates to ~16 FPS while the backend
- * processes at full rate.
- *
- * Reconnects automatically on disconnect.
- */
-export function useTrackStream() {
-  const [state, setState] = useState<TrackStreamState>({
-    tracks: new Map(),
-    events: [],
-    connected: false,
-    lastUpdateMs: 0,
-  });
+function startWebSockets() {
+  if (started) return;
+  started = true;
 
-  // Mutable buffer that accumulates updates between throttled flushes
-  const bufferRef = useRef<Map<string, FusedTrack>>(new Map());
-  const eventBufferRef = useRef<TrackEvent[]>([]);
-  const throttleRef = useRef<number | null>(null);
-
-  const flushBuffer = useCallback(() => {
-    setState(prev => {
-      const merged = new Map(prev.tracks);
-      bufferRef.current.forEach((track, id) => {
+  function connectTracks() {
+    const ws = new WebSocket(`${WS_HOST}/ws/tracks`);
+    ws.onopen = () => { globalConnected = true; notify(); };
+    ws.onmessage = (msg) => {
+      try {
+        const track: FusedTrack = JSON.parse(msg.data);
         if (track.state === 'DROPPED') {
-          merged.delete(id);
+          globalTracks.delete(track.trackId);
         } else {
-          merged.set(id, track);
+          globalTracks.set(track.trackId, track);
         }
-      });
-      bufferRef.current.clear();
+        globalTracks = new Map(globalTracks);
+        notify();
+      } catch (e) {}
+    };
+    ws.onclose = () => {
+      globalConnected = false;
+      notify();
+      setTimeout(connectTracks, 2000);
+    };
+    ws.onerror = () => ws.close();
+  }
 
-      const newEvents = [...prev.events, ...eventBufferRef.current].slice(-200);
-      eventBufferRef.current = [];
+  function connectEvents() {
+    const ws = new WebSocket(`${WS_HOST}/ws/events`);
+    ws.onmessage = (msg) => {
+      try {
+        const event: TrackEvent = JSON.parse(msg.data);
+        globalEvents = [...globalEvents.slice(-200), event];
+        notify();
+      } catch (e) {}
+    };
+    ws.onclose = () => setTimeout(connectEvents, 2000);
+    ws.onerror = () => ws.close();
+  }
 
-      return {
-        tracks: merged,
-        events: newEvents,
-        connected: prev.connected,
-        lastUpdateMs: Date.now(),
-      };
-    });
-    throttleRef.current = null;
-  }, []);
+  connectTracks();
+  connectEvents();
+}
 
-  const scheduleFlush = useCallback(() => {
-    if (throttleRef.current === null) {
-      throttleRef.current = window.setTimeout(flushBuffer, THROTTLE_INTERVAL_MS);
-    }
-  }, [flushBuffer]);
+export function useTrackStream() {
+  const [, forceUpdate] = useState(0);
 
   useEffect(() => {
-    let trackWs: WebSocket | null = null;
-    let eventWs: WebSocket | null = null;
-    let reconnectTimer: number | null = null;
-
-    function connectTracks() {
-      trackWs = new WebSocket(WS_TRACKS_URL);
-
-      trackWs.onopen = () => {
-        setState(prev => ({ ...prev, connected: true }));
-      };
-
-      trackWs.onmessage = (msg) => {
-        try {
-          const track: FusedTrack = JSON.parse(msg.data);
-          bufferRef.current.set(track.trackId, track);
-          scheduleFlush();
-        } catch (e) {
-          console.warn('Invalid track message:', e);
-        }
-      };
-
-      trackWs.onclose = () => {
-        setState(prev => ({ ...prev, connected: false }));
-        reconnectTimer = window.setTimeout(connectTracks, RECONNECT_DELAY_MS);
-      };
-
-      trackWs.onerror = () => {
-        trackWs?.close();
-      };
-    }
-
-    function connectEvents() {
-      eventWs = new WebSocket(WS_EVENTS_URL);
-
-      eventWs.onmessage = (msg) => {
-        try {
-          const event: TrackEvent = JSON.parse(msg.data);
-          eventBufferRef.current.push(event);
-          scheduleFlush();
-        } catch (e) {
-          console.warn('Invalid event message:', e);
-        }
-      };
-
-      eventWs.onclose = () => {
-        window.setTimeout(connectEvents, RECONNECT_DELAY_MS);
-      };
-
-      eventWs.onerror = () => {
-        eventWs?.close();
-      };
-    }
-
-    connectTracks();
-    connectEvents();
-
+    startWebSockets();
+    const listener = () => forceUpdate(n => n + 1);
+    listeners.push(listener);
     return () => {
-      trackWs?.close();
-      eventWs?.close();
-      if (reconnectTimer) clearTimeout(reconnectTimer);
-      if (throttleRef.current) clearTimeout(throttleRef.current);
+      listeners = listeners.filter(l => l !== listener);
     };
-  }, [scheduleFlush]);
+  }, []);
 
-  return state;
+  return {
+    tracks: globalTracks,
+    events: globalEvents,
+    connected: globalConnected,
+    lastUpdateMs: Date.now(),
+  };
 }
