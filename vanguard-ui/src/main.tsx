@@ -40,10 +40,13 @@ function useTrailHistory(tracks: Map<string, FusedTrack>) {
         trails.current.delete(id)
         return
       }
-      const trail = trails.current.get(id) || []
-      trail.push([t.px, t.py])
-      if (trail.length > 120) trail.splice(0, trail.length - 120)
-      trails.current.set(id, trail)
+      // Only record trail points with valid coordinates
+      if (Math.abs(t.px) <= 180 && Math.abs(t.py) <= 90) {
+        const trail = trails.current.get(id) || []
+        trail.push([t.px, t.py])
+        if (trail.length > 120) trail.splice(0, trail.length - 120)
+        trails.current.set(id, trail)
+      }
     })
   }, [tracks])
 
@@ -96,7 +99,13 @@ function App() {
 
   const aliveTracks = useMemo(() => {
     const result: [string, FusedTrack][] = []
-    tracks.forEach((t, id) => { if (t.state !== 'DROPPED') result.push([id, t]) })
+    tracks.forEach((t, id) => {
+      if (t.state !== 'DROPPED' &&
+          Math.abs(t.px) <= 180 && Math.abs(t.py) <= 90 &&
+          Number.isFinite(t.px) && Number.isFinite(t.py)) {
+        result.push([id, t])
+      }
+    })
     return result
   }, [tracks])
 
@@ -168,7 +177,7 @@ function App() {
           {/* Connection banner when disconnected */}
           {!wsStatus && (
             <div style={{ position: 'absolute', top: 12, left: '50%', transform: 'translateX(-50%)', background: 'rgba(127,29,29,0.92)', border: '1px solid #ef4444', borderRadius: 8, padding: '8px 20px', zIndex: 15, backdropFilter: 'blur(8px)' }}>
-              <span style={{ color: '#fca5a5', fontSize: 13, fontWeight: 600 }}>Waiting for backend connection on port 8080...</span>
+              <span style={{ color: '#fca5a5', fontSize: 13, fontWeight: 600 }}>Waiting for backend connection...</span>
             </div>
           )}
 
