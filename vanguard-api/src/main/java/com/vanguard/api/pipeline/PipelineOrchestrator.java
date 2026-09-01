@@ -104,8 +104,9 @@ public class PipelineOrchestrator {
         GeometryFactory gf = new GeometryFactory();
         // R-21: elliptical zone at (-117.05, 34.755) mapped to meters
         // Using a circular polygon centered at the zone in metric space
-        double cx = -117.05 * 111000, cy = 34.755 * 111000;
-        double rx = 0.06 * 111000, ry = 0.04 * 111000;
+        double cLngRef = -117.15, cLatRef = 34.74;
+        double cx = (-117.05 - cLngRef) * 92000, cy = (34.755 - cLatRef) * 111000;
+        double rx = 0.06 * 92000, ry = 0.04 * 111000;
         Coordinate[] coords = new Coordinate[65];
         for (int i = 0; i < 64; i++) {
             double a = (i / 64.0) * Math.PI * 2;
@@ -202,8 +203,8 @@ public class PipelineOrchestrator {
                 fused.put("trackId", track.getTrackId());
                 fused.put("px", cLng + track.getPx() / mPerDegLng);
                 fused.put("py", cLat + track.getPy() / mPerDegLat);
-                fused.put("vx", track.getVx() / mPerDegLng);
-                fused.put("vy", track.getVy() / mPerDegLat);
+                fused.put("vx", track.getVx());
+                fused.put("vy", track.getVy());
                 fused.put("state", track.getState().name());
                 fused.put("uncertainty", track.getPositionUncertainty());
                 fused.put("lastUpdateMs", wallMs);

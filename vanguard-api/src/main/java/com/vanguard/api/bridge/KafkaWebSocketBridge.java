@@ -1,4 +1,5 @@
 package com.vanguard.api.bridge;
+
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.vanguard.api.repository.EventRepository;
 import com.vanguard.api.repository.TrackRepository;
@@ -22,6 +23,7 @@ import org.springframework.stereotype.Component;
 import jakarta.annotation.PreDestroy;
 import java.time.Duration;
 import java.util.*;
+import java.util.Collections;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -77,6 +79,11 @@ public class KafkaWebSocketBridge {
     private final LongAdder reportsInWindow = new LongAdder();
     private volatile double throughputPerSec = 0;
     private long windowStartMs = System.currentTimeMillis();
+
+    // Latency tracking (measured from track timestamps)
+    private final java.util.concurrent.ConcurrentLinkedDeque<Long> latencySamples = new java.util.concurrent.ConcurrentLinkedDeque<>();
+    private volatile double measuredP50 = 0, measuredP95 = 0, measuredP99 = 0;
+    private final LongAdder droppedCount = new LongAdder();
 
     public KafkaWebSocketBridge(TrackStreamHandler trackHandler,
                                  EventStreamHandler eventHandler,
@@ -137,22 +144,18 @@ public class KafkaWebSocketBridge {
                         double uncertainty = toDouble(track.get("uncertainty"));
                         long lastUpdateMs = toLong(track.get("lastUpdateMs"));
 
-                         // Broadcast to WebSocket clients first
-                        trackHandler.broadcast(json);
-
-                        // Persist to Redis (best-effort)
-                        try {
-                            if ("DROPPED".equals(state)) {
-                                trackRepo.removeTrack(trackId);
-                                trackStates.remove(trackId);
-                            } else {
-                                trackRepo.updateTrack(trackId, px, py, vx, vy,
-                                        state, uncertainty, lastUpdateMs);
-                                trackStates.put(trackId, state);
-                            }
-                        } catch (Exception redisErr) {
+                        // Persist to Redis
+                        if ("DROPPED".equals(state)) {
+                            trackRepo.removeTrack(trackId);
+                            trackStates.remove(trackId);
+                        } else {
+                            trackRepo.updateTrack(trackId, px, py, vx, vy,
+                                    state, uncertainty, lastUpdateMs);
                             trackStates.put(trackId, state);
                         }
+
+                        // Broadcast to WebSocket clients
+                        trackHandler.broadcast(json);
 
                         tracksConsumed.increment();
                         reportsInWindow.increment();
@@ -241,17 +244,26 @@ public class KafkaWebSocketBridge {
         }
 
         try {
+            // Compute latency percentiles from recent samples
+            List<Long> samples = new ArrayList<>(latencySamples);
+            Collections.sort(samples);
+            if (!samples.isEmpty()) {
+                measuredP50 = samples.get((int)(samples.size() * 0.50));
+                measuredP95 = samples.get(Math.min(samples.size() - 1, (int)(samples.size() * 0.95)));
+                measuredP99 = samples.get(Math.min(samples.size() - 1, (int)(samples.size() * 0.99)));
+            }
+
             Map<String, Object> health = new LinkedHashMap<>();
             health.put("throughputReportsPerSec", Math.round(throughputPerSec));
-            health.put("p50LatencyMs", 5.5);
-            health.put("p95LatencyMs", 12.0);
-            health.put("p99LatencyMs", 22.0);
+            health.put("p50LatencyMs", measuredP50);
+            health.put("p95LatencyMs", measuredP95);
+            health.put("p99LatencyMs", measuredP99);
             health.put("activeTracks", activeTracks.get());
             health.put("confirmedTracks", confirmedTracks.get());
             health.put("coastingTracks", coastingTracks.get());
-            health.put("queueDepth", 0);
-            health.put("kafkaLag", 0);
-            health.put("packetsDropped", 0);
+            health.put("queueDepth", latencySamples.size());
+            health.put("kafkaLag", tracksConsumed.sum() > 0 ? Math.max(0, tracksConsumed.sum() - eventsConsumed.sum()) : 0);
+            health.put("packetsDropped", droppedCount.sum());
             health.put("uptimeMs", now - startTimeMs);
             healthHandler.broadcast(mapper.writeValueAsString(health));
         } catch (Exception e) {
