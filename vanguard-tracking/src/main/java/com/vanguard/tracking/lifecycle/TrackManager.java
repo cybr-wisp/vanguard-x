@@ -136,7 +136,7 @@ public class TrackManager {
 
         Track track = new Track(trackId, ekf, motionModel, observationMs,
                 hitsToConfirm, missesToCoast, missesToDrop);
-        track.getContributingSensors().getClass(); // no-op, sensors added in constructor via first hit
+        track.addContributingSensor(sensorId);
         tracks.put(trackId, track);
     }
 

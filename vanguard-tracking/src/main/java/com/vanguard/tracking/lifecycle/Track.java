@@ -129,6 +129,12 @@ public class Track {
     public int getConsecutiveMisses()    { return consecutiveMisses; }
     public int getTotalHits()            { return totalHits; }
     public Set<String> getContributingSensors() { return Collections.unmodifiableSet(contributingSensors); }
+
+    public void addContributingSensor(String sensorId) {
+        if (sensorId != null && !sensorId.isBlank()) {
+            contributingSensors.add(sensorId);
+        }
+    }
     public boolean isAlive()             { return state != TrackState.DROPPED; }
 
     public double getPx() { return ekf.getPx(); }
