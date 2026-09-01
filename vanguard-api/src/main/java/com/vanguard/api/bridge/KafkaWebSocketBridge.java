@@ -45,6 +45,14 @@ public class KafkaWebSocketBridge {
 
     private static final int MAX_LATENCY_SAMPLES = 2048;
 
+    private static final int TRACK_PERSIST_FLUSH_MS = 200;
+    private static final int MAX_TRACK_PERSIST_BATCH = 256;
+    private static final int MAX_PENDING_TRACK_WRITES = 4096;
+
+    // Browser delivery is intentionally decoupled from Kafka consumption.
+    // 50 ms = 20 Hz, which is smooth for the tactical display.
+    private static final int TRACK_WS_FLUSH_MS = 50;
+
     private final TrackStreamHandler trackHandler;
     private final EventStreamHandler eventHandler;
     private final HealthStreamHandler healthHandler;
@@ -60,6 +68,17 @@ public class KafkaWebSocketBridge {
 
     private Thread trackThread;
     private Thread eventThread;
+    private Thread trackPersistenceThread;
+    private Thread trackBroadcastThread;
+
+    private final Map<String, PendingTrackWrite> pendingTrackWrites =
+            new ConcurrentHashMap<>();
+
+    private final Map<String, String> pendingTrackBroadcasts =
+            new ConcurrentHashMap<>();
+
+    private final LongAdder trackPersistenceSkipped =
+            new LongAdder();
 
     private final LongAdder tracksConsumed = new LongAdder();
     private final LongAdder eventsConsumed = new LongAdder();
@@ -96,6 +115,17 @@ public class KafkaWebSocketBridge {
 
     private long lastGatewayAccepted;
 
+    private record PendingTrackWrite(
+            String trackId,
+            double px,
+            double py,
+            double vx,
+            double vy,
+            String state,
+            double uncertainty,
+            long lastUpdateMs) {
+    }
+
     public KafkaWebSocketBridge(
             TrackStreamHandler trackHandler,
             EventStreamHandler eventHandler,
@@ -131,6 +161,16 @@ public class KafkaWebSocketBridge {
                         .name("kafka-event-bridge")
                         .start(this::consumeEvents);
 
+        trackPersistenceThread =
+                Thread.ofVirtual()
+                        .name("redis-track-persistence")
+                        .start(this::runTrackPersistence);
+
+        trackBroadcastThread =
+                Thread.ofVirtual()
+                        .name("websocket-track-broadcaster")
+                        .start(this::runTrackBroadcast);
+
         log.info(
                 "KafkaWebSocketBridge started (bootstrap={})",
                 bootstrapServers
@@ -140,6 +180,27 @@ public class KafkaWebSocketBridge {
     @PreDestroy
     public void stop() {
         running.set(false);
+
+        if (trackBroadcastThread != null) {
+            trackBroadcastThread.interrupt();
+        }
+
+        if (trackPersistenceThread != null) {
+            trackPersistenceThread.interrupt();
+        }
+
+        try {
+            if (trackBroadcastThread != null) {
+                trackBroadcastThread.join(2000);
+            }
+
+            if (trackPersistenceThread != null) {
+                trackPersistenceThread.join(2000);
+            }
+
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
 
         log.info(
                 "KafkaWebSocketBridge stopping. tracks={} events={}",
@@ -213,8 +274,9 @@ public class KafkaWebSocketBridge {
                         long lastUpdateMs =
                                 toLong(track.get("lastUpdateMs"));
 
-                        // Live delivery must not depend on Redis.
-                        trackHandler.broadcast(json);
+                        // Coalesce browser delivery by track ID so a slow
+                        // WebSocket client can never throttle Kafka ingestion.
+                        pendingTrackBroadcasts.put(trackId, json);
 
                         if ("DROPPED".equals(state)) {
                             trackStates.remove(trackId);
@@ -222,11 +284,8 @@ public class KafkaWebSocketBridge {
                             trackStates.put(trackId, state);
                         }
 
-                        try {
-                            if ("DROPPED".equals(state)) {
-                                trackRepo.removeTrack(trackId);
-                            } else {
-                                trackRepo.updateTrack(
+                        enqueueTrackPersistence(
+                                new PendingTrackWrite(
                                         trackId,
                                         px,
                                         py,
@@ -235,15 +294,8 @@ public class KafkaWebSocketBridge {
                                         state,
                                         uncertainty,
                                         lastUpdateMs
-                                );
-                            }
-                        } catch (Exception redisError) {
-                            log.warn(
-                                    "Redis track persistence failed for {}: {}",
-                                    trackId,
-                                    redisError.getMessage()
-                            );
-                        }
+                                )
+                        );
 
                         long latency =
                                 Math.max(
@@ -281,6 +333,154 @@ public class KafkaWebSocketBridge {
                         "Track bridge consumer crashed",
                         e
                 );
+            }
+        }
+    }
+
+    private void runTrackBroadcast() {
+
+        while (running.get()) {
+            try {
+                flushPendingTrackBroadcasts();
+                Thread.sleep(TRACK_WS_FLUSH_MS);
+
+            } catch (InterruptedException e) {
+                break;
+
+            } catch (Exception e) {
+                log.warn(
+                        "Track WebSocket broadcaster error: {}",
+                        e.getMessage()
+                );
+            }
+        }
+
+        // Best-effort final delivery during orderly shutdown.
+        flushPendingTrackBroadcasts();
+    }
+
+    private void flushPendingTrackBroadcasts() {
+
+        for (Map.Entry<String, String> entry
+                : pendingTrackBroadcasts.entrySet()) {
+
+            String trackId = entry.getKey();
+            String json = entry.getValue();
+
+            // Remove only this exact update. If Kafka wrote a newer update
+            // concurrently, the newer one remains for the next 50 ms tick.
+            if (!pendingTrackBroadcasts.remove(trackId, json)) {
+                continue;
+            }
+
+            try {
+                trackHandler.broadcast(json);
+
+            } catch (Exception e) {
+                log.warn(
+                        "Track WebSocket broadcast failed for {}: {}",
+                        trackId,
+                        e.getMessage()
+                );
+            }
+        }
+    }
+
+    private void enqueueTrackPersistence(
+            PendingTrackWrite update) {
+
+        pendingTrackWrites.compute(
+                update.trackId(),
+                (trackId, existing) -> {
+
+                    if (existing == null
+                            && pendingTrackWrites.size()
+                            >= MAX_PENDING_TRACK_WRITES) {
+
+                        trackPersistenceSkipped.increment();
+                        return null;
+                    }
+
+                    if (existing == null
+                            || update.lastUpdateMs()
+                            >= existing.lastUpdateMs()) {
+
+                        return update;
+                    }
+
+                    return existing;
+                }
+        );
+    }
+
+    private void runTrackPersistence() {
+
+        while (running.get()) {
+            try {
+                flushPendingTrackPersistence();
+                Thread.sleep(TRACK_PERSIST_FLUSH_MS);
+
+            } catch (InterruptedException e) {
+                break;
+
+            } catch (Exception e) {
+                log.warn(
+                        "Track persistence worker error: {}",
+                        e.getMessage()
+                );
+            }
+        }
+
+        flushPendingTrackPersistence();
+    }
+
+    private void flushPendingTrackPersistence() {
+
+        int persisted = 0;
+
+        for (Map.Entry<String, PendingTrackWrite> entry
+                : pendingTrackWrites.entrySet()) {
+
+            if (persisted >= MAX_TRACK_PERSIST_BATCH) {
+                break;
+            }
+
+            String trackId = entry.getKey();
+            PendingTrackWrite update = entry.getValue();
+
+            if (!pendingTrackWrites.remove(trackId, update)) {
+                continue;
+            }
+
+            try {
+                if ("DROPPED".equals(update.state())) {
+                    trackRepo.removeTrack(update.trackId());
+                } else {
+                    trackRepo.updateTrack(
+                            update.trackId(),
+                            update.px(),
+                            update.py(),
+                            update.vx(),
+                            update.vy(),
+                            update.state(),
+                            update.uncertainty(),
+                            update.lastUpdateMs()
+                    );
+                }
+
+                persisted++;
+
+            } catch (Exception redisError) {
+
+                enqueueTrackPersistence(update);
+
+                log.warn(
+                        "Redis track persistence flush failed for {}: {}",
+                        trackId,
+                        redisError.getMessage()
+                );
+
+                break;
             }
         }
     }
@@ -505,6 +705,21 @@ public class KafkaWebSocketBridge {
             health.put(
                     "eventKafkaLag",
                     eventKafkaLag.get()
+            );
+
+            health.put(
+                    "pendingTrackPersistence",
+                    pendingTrackWrites.size()
+            );
+
+            health.put(
+                    "pendingTrackBroadcasts",
+                    pendingTrackBroadcasts.size()
+            );
+
+            health.put(
+                    "trackPersistenceSkipped",
+                    trackPersistenceSkipped.sum()
             );
 
             health.put(
