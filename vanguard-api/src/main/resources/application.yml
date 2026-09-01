@@ -8,13 +8,20 @@ spring:
     redis:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
+  autoconfigure:
+    # In demo mode, skip Redis/Kafka auto-config if not available
+    exclude:
+      - org.springframework.boot.autoconfigure.data.redis.RedisAutoConfiguration
+      - org.springframework.boot.autoconfigure.data.redis.RedisRepositoriesAutoConfiguration
 
-# Kafka consumer for reading track/event updates
+# Kafka consumer for reading track/event updates (used when demo is disabled)
 vanguard:
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP:localhost:9092}
   tracking:
     consumer-group: vanguard-api-readers
+  demo:
+    enabled: ${DEMO_ENABLED:true}
 
 management:
   endpoints:
