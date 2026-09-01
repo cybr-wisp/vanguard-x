@@ -6,7 +6,6 @@ import org.springframework.web.socket.*;
 import org.springframework.web.socket.handler.TextWebSocketHandler;
 import org.springframework.stereotype.Component;
 
-import java.io.IOException;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArraySet;
 
@@ -59,18 +58,19 @@ public class WebSocketConfig implements WebSocketConfigurer {
         }
 
         /**
-         * Broadcast a message to all connected clients. Silently drops
-         * clients that fail (they'll be cleaned up on close).
+         * Broadcast a message to all connected clients. Dead sessions are
+         * removed immediately to prevent poisoning future broadcasts.
          */
         public void broadcast(String message) {
             TextMessage msg = new TextMessage(message);
             for (WebSocketSession session : sessions) {
-                if (session.isOpen()) {
-                    try {
+                try {
+                    if (session.isOpen()) {
                         session.sendMessage(msg);
-                    } catch (IOException e) {
-                        // Client gone, will be removed on close
                     }
+                } catch (Exception e) {
+                    sessions.remove(session);
+                    try { session.close(); } catch (Exception ignored) {}
                 }
             }
         }
