@@ -23,12 +23,12 @@ public class EventController {
     }
 
     @GetMapping
-    public List<String> getRecentEvents(@RequestParam(defaultValue = "50") int count) {
+    public List<String> getRecentEvents(@RequestParam(name = "count", defaultValue = "50") int count) {
         return eventRepo.getRecentEvents(Math.min(count, 500));
     }
 
     @GetMapping("/{eventId}")
-    public ResponseEntity<Map<Object, Object>> getEvent(@PathVariable String eventId) {
+    public ResponseEntity<Map<Object, Object>> getEvent(@PathVariable("eventId") String eventId) {
         Map<Object, Object> event = eventRepo.getEvent(eventId);
         if (event.isEmpty()) return ResponseEntity.notFound().build();
         return ResponseEntity.ok(event);

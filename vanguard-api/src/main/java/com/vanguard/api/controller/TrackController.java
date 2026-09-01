@@ -29,14 +29,14 @@ public class TrackController {
     }
 
     @GetMapping("/{trackId}")
-    public ResponseEntity<Map<Object, Object>> getTrack(@PathVariable String trackId) {
+    public ResponseEntity<Map<Object, Object>> getTrack(@PathVariable("trackId") String trackId) {
         Map<Object, Object> track = trackRepo.getTrack(trackId);
         if (track.isEmpty()) return ResponseEntity.notFound().build();
         return ResponseEntity.ok(track);
     }
 
     @GetMapping("/{trackId}/trail")
-    public List<String> getTrail(@PathVariable String trackId) {
+    public List<String> getTrail(@PathVariable("trackId") String trackId) {
         return trackRepo.getTrail(trackId);
     }
 }
