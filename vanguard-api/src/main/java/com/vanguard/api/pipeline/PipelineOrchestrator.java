@@ -1,16 +1,27 @@
 package com.vanguard.api.pipeline;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.vanguard.gateway.GatewayMetrics;
+import com.vanguard.gateway.NettyUdpServer;
+import com.vanguard.gateway.PacketValidator;
+import com.vanguard.gateway.SequenceTracker;
+import com.vanguard.gateway.kafka.KafkaRawReportProducer;
+import com.vanguard.protocol.SensorReportProto;
 import com.vanguard.simulator.*;
-import com.vanguard.tracking.association.*;
-import com.vanguard.tracking.estimation.*;
-import com.vanguard.tracking.lifecycle.*;
 import com.vanguard.spatial.*;
-import org.apache.kafka.clients.producer.*;
-import org.apache.kafka.common.serialization.ByteArraySerializer;
-import org.apache.kafka.common.serialization.StringSerializer;
+import com.vanguard.spatial.kafka.SpatialPipelineConsumer;
+import com.vanguard.tracking.association.DataAssociator;
+import com.vanguard.tracking.association.MahalanobisGate;
+import com.vanguard.tracking.estimation.MeasurementModel;
+import com.vanguard.tracking.estimation.MotionModel;
+import com.vanguard.tracking.lifecycle.Track;
+import com.vanguard.tracking.lifecycle.TrackManager;
+import com.vanguard.tracking.pipeline.TrackingPipelineConsumer;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.ejml.simple.SimpleMatrix;
-import org.locationtech.jts.geom.*;
+import org.locationtech.jts.geom.Coordinate;
+import org.locationtech.jts.geom.GeometryFactory;
+import org.locationtech.jts.geom.Polygon;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -20,56 +31,84 @@ import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
 
 import jakarta.annotation.PreDestroy;
+import java.net.DatagramPacket;
+import java.net.DatagramSocket;
+import java.net.InetAddress;
+import java.nio.charset.StandardCharsets;
 import java.util.*;
-import java.util.concurrent.*;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * Full pipeline orchestrator. Runs the complete data path in-process:
+ * Full Vanguard runtime.
  *
- *   WorldSimulator -> SensorNodes -> (raw reports to Kafka)
- *   TrackingPipelineConsumer (Kafka) -> EKF/Association -> (fused tracks to Kafka)
- *   SpatialPipelineConsumer (Kafka) -> Geofence/AlertSM -> (events to Kafka)
+ * Actual data path:
  *
- * The KafkaWebSocketBridge (separate bean) reads the output topics and
- * pushes to WebSocket clients. This gives the full end-to-end pipeline
- * through Kafka, not a simulation shortcut.
+ * WorldSimulator
+ *   -> SensorNode
+ *   -> Protobuf / UDP
+ *   -> NettyUdpServer
+ *   -> KafkaRawReportProducer
+ *   -> sensor-reports.raw
+ *   -> TrackingPipelineConsumer
+ *   -> EKF / association / lifecycle
+ *   -> tracks.fused
+ *   -> SpatialPipelineConsumer
+ *   -> GeofenceEngine / AlertStateMachine
+ *   -> track-events
+ *   -> KafkaWebSocketBridge
+ *   -> WebSocket clients
  *
- * Activated when vanguard.demo.enabled=false (requires Kafka + Redis running).
+ * Activated only when vanguard.demo.enabled=false.
  */
 @Component
 @ConditionalOnProperty(name = "vanguard.demo.enabled", havingValue = "false")
 public class PipelineOrchestrator {
 
-    private static final Logger log = LoggerFactory.getLogger(PipelineOrchestrator.class);
+    private static final Logger log =
+            LoggerFactory.getLogger(PipelineOrchestrator.class);
 
-    private static final String RAW_TOPIC   = "sensor-reports.raw";
-    private static final String FUSED_TOPIC = "tracks.fused";
-    private static final String EVENT_TOPIC = "track-events";
+    private static final double CENTER_LNG = -117.15;
+    private static final double CENTER_LAT = 34.74;
+    private static final double METERS_PER_DEG_LNG = 92_000.0;
+    private static final double METERS_PER_DEG_LAT = 111_000.0;
 
     @Value("${vanguard.kafka.bootstrap-servers}")
     private String bootstrapServers;
 
+    @Value("${vanguard.gateway.udp-port:5000}")
+    private int udpPort;
+
     private final ObjectMapper mapper;
     private final AtomicBoolean running = new AtomicBoolean(false);
 
-    private ScheduledExecutorService simExecutor;
-    private ExecutorService pipelineExecutor;
-    private KafkaProducer<String, byte[]> rawProducer;
+    private final List<SensorNode> sensors = new ArrayList<>();
+    private final Map<String, MeasurementModel> measurementModels =
+            new LinkedHashMap<>();
 
-    // Tracking state
+    private WorldSimulator world;
+    private Random rng;
+    private long simTimeMs;
+
     private TrackManager trackManager;
     private GeofenceEngine geofenceEngine;
-    private AlertStateMachine alertSM;
-    private final List<SensorNode> sensors = new ArrayList<>();
-    private final List<MeasurementModel> sensorModels = new ArrayList<>();
-    private WorldSimulator world;
-    private long simTimeMs;
-    private Random rng;
+    private AlertStateMachine alertStateMachine;
 
-    // Kafka producers for fused tracks and events
-    private KafkaProducer<String, byte[]> fusedProducer;
-    private KafkaProducer<String, byte[]> eventProducer;
+    private GatewayMetrics gatewayMetrics;
+    private KafkaRawReportProducer gatewayProducer;
+    private NettyUdpServer gatewayServer;
+
+    private TrackingPipelineConsumer trackingConsumer;
+    private SpatialPipelineConsumer spatialConsumer;
+
+    private Thread trackingThread;
+    private Thread spatialThread;
+
+    private ScheduledExecutorService simExecutor;
+    private DatagramSocket udpSocket;
+    private InetAddress gatewayAddress;
 
     public PipelineOrchestrator(ObjectMapper mapper) {
         this.mapper = mapper;
@@ -77,259 +116,923 @@ public class PipelineOrchestrator {
 
     @EventListener(ApplicationReadyEvent.class)
     public void start() {
-        running.set(true);
-        log.info("Starting full pipeline orchestrator (bootstrap={})", bootstrapServers);
-
-        // Build the scenario
-        ScenarioConfig config = buildDemoScenario();
-        world = WorldSimulator.fromConfig(config);
-        rng = new Random(config.seed());
-        simTimeMs = 0;
-
-        // Build sensors + measurement models
-        for (ScenarioConfig.SensorSpec spec : config.sensors()) {
-            sensors.add(new SensorNode(spec, new Random(rng.nextLong())));
-            sensorModels.add(new MeasurementModel(spec.sx(), spec.sy(),
-                    spec.sigmaRangeM(), spec.sigmaBearingRad()));
+        if (!running.compareAndSet(false, true)) {
+            return;
         }
 
-        // Build tracker
-        MotionModel motion = new MotionModel(2.0);
-        DataAssociator assoc = new DataAssociator(new MahalanobisGate(9.21));
-        trackManager = new TrackManager(assoc, motion, 3, 3, 8, 10000, 100);
+        log.info(
+                "Starting full Vanguard pipeline (Kafka={}, UDP={})",
+                bootstrapServers,
+                udpPort
+        );
 
-        // Build geofence engine with zone R-21
+        try {
+            ScenarioConfig config = buildDemoScenario();
+
+            world = WorldSimulator.fromConfig(config);
+            rng = new Random(config.seed());
+            simTimeMs = 0;
+
+            for (ScenarioConfig.SensorSpec spec : config.sensors()) {
+                sensors.add(
+                        new SensorNode(
+                                spec,
+                                new Random(rng.nextLong())
+                        )
+                );
+
+                measurementModels.put(
+                        spec.sensorId(),
+                        new MeasurementModel(
+                                spec.sx(),
+                                spec.sy(),
+                                spec.sigmaRangeM(),
+                                spec.sigmaBearingRad()
+                        )
+                );
+            }
+
+            MotionModel motionModel = new MotionModel(2.0);
+
+            DataAssociator associator =
+                    new DataAssociator(
+                            new MahalanobisGate(9.21)
+                    );
+
+            trackManager = new TrackManager(
+                    associator,
+                    motionModel,
+                    3,
+                    3,
+                    8,
+                    10_000,
+                    100
+            );
+
+            buildSpatialEngine();
+
+            /*
+             * Kafka processing boundaries.
+             *
+             * These consumers now own tracking and spatial processing.
+             * The simulator is no longer allowed to invoke those engines
+             * directly.
+             */
+            trackingConsumer = new TrackingPipelineConsumer(
+                    bootstrapServers,
+                    "vanguard-tracking-pipeline",
+                    this::processRawReports
+            );
+
+            spatialConsumer = new SpatialPipelineConsumer(
+                    bootstrapServers,
+                    "vanguard-spatial-pipeline",
+                    this::evaluateFusedTracks
+            );
+
+            trackingThread = Thread.ofVirtual()
+                    .name("tracking-pipeline")
+                    .start(trackingConsumer);
+
+            spatialThread = Thread.ofVirtual()
+                    .name("spatial-pipeline")
+                    .start(spatialConsumer);
+
+            /*
+             * UDP gateway.
+             */
+            gatewayMetrics = new GatewayMetrics();
+            gatewayProducer =
+                    new KafkaRawReportProducer(bootstrapServers);
+
+            gatewayServer = new NettyUdpServer(
+                    udpPort,
+                    gatewayMetrics,
+                    new PacketValidator(30_000),
+                    new SequenceTracker(),
+                    gatewayProducer
+            );
+
+            gatewayServer.start();
+
+            udpSocket = new DatagramSocket();
+            gatewayAddress = InetAddress.getLoopbackAddress();
+
+            /*
+             * Start simulator only after Kafka consumers and UDP gateway
+             * have been initialized.
+             */
+            simExecutor =
+                    Executors.newSingleThreadScheduledExecutor(
+                            Thread.ofVirtual()
+                                    .name("pipeline-sim-", 0)
+                                    .factory()
+                    );
+
+            simExecutor.scheduleAtFixedRate(
+                    this::tick,
+                    1_000,
+                    70,
+                    TimeUnit.MILLISECONDS
+            );
+
+            log.info(
+                    "Full pipeline running: targets={}, sensors={}, UDP={}, zone=R-21",
+                    world.getTargetCount(),
+                    sensors.size(),
+                    udpPort
+            );
+
+        } catch (Exception e) {
+            log.error("Unable to start full pipeline", e);
+            stop();
+            throw new IllegalStateException(
+                    "Unable to start Vanguard full pipeline",
+                    e
+            );
+        }
+    }
+
+    /**
+     * Simulator boundary.
+     *
+     * This method is intentionally forbidden from calling TrackManager,
+     * GeofenceEngine, or AlertStateMachine directly.
+     *
+     * It only produces sensor packets and sends them through UDP.
+     */
+    private void tick() {
+        if (!running.get()) {
+            return;
+        }
+
+        try {
+            simTimeMs += 100;
+
+            List<TargetModel.TruthRecord> truth =
+                    world.truthAt(simTimeMs);
+
+            if (truth.isEmpty()) {
+                simTimeMs = 0;
+                return;
+            }
+
+            /*
+             * The world uses deterministic simulated time for motion.
+             * Wire timestamps use wall-clock time because the gateway
+             * validates packet freshness.
+             */
+            long observationTimeMs =
+                    System.currentTimeMillis();
+
+            for (SensorNode sensor : sensors) {
+                List<SensorNode.RawReport> reports =
+                        sensor.observe(
+                                truth,
+                                observationTimeMs,
+                                rng
+                        );
+
+                for (SensorNode.RawReport report : reports) {
+                    SensorReportProto.SensorReport proto =
+                            SensorReportProto.SensorReport
+                                    .newBuilder()
+                                    .setSensorId(report.sensorId())
+                                    .setTimestampMs(
+                                            report.timestampMs()
+                                    )
+                                    .setSensorX(report.sensorX())
+                                    .setSensorY(report.sensorY())
+                                    .setRange(report.rangeM())
+                                    .setAzimuth(
+                                            report.azimuthRad()
+                                    )
+                                    .setSignalStrength(
+                                            report.signalStrength()
+                                    )
+                                    .setSequenceNumber(
+                                            report.sequenceNumber()
+                                    )
+                                    .build();
+
+                    byte[] payload = proto.toByteArray();
+
+                    DatagramPacket packet =
+                            new DatagramPacket(
+                                    payload,
+                                    payload.length,
+                                    gatewayAddress,
+                                    udpPort
+                            );
+
+                    udpSocket.send(packet);
+                }
+            }
+
+        } catch (Exception e) {
+            if (running.get()) {
+                log.warn(
+                        "Simulator UDP tick failed: {}",
+                        e.getMessage()
+                );
+            }
+        }
+    }
+
+    /**
+     * Kafka raw report processor.
+     *
+     * Called exclusively by TrackingPipelineConsumer.
+     */
+    private List<TrackingPipelineConsumer.KeyValue> processRawReports(
+            List<ConsumerRecord<String, byte[]>> records) {
+
+        /*
+         * Group by observation timestamp first, then sensor.
+         *
+         * TrackManager expects one sensor batch representing one
+         * observation cycle.
+         */
+        TreeMap<Long, Map<String, List<SimpleMatrix>>> batches =
+                new TreeMap<>();
+
+        for (ConsumerRecord<String, byte[]> record : records) {
+            try {
+                String csv =
+                        new String(
+                                record.value(),
+                                StandardCharsets.UTF_8
+                        );
+
+                String[] p = csv.split(",");
+
+                if (p.length != 8) {
+                    log.warn(
+                            "Ignoring malformed raw Kafka report: {}",
+                            csv
+                    );
+                    continue;
+                }
+
+                String sensorId = p[0];
+                long timestampMs =
+                        Long.parseLong(p[1]);
+
+                double range =
+                        Double.parseDouble(p[4]);
+
+                double azimuth =
+                        Double.parseDouble(p[5]);
+
+                if (!measurementModels.containsKey(sensorId)) {
+                    log.warn(
+                            "Unknown sensor in Kafka report: {}",
+                            sensorId
+                    );
+                    continue;
+                }
+
+                SimpleMatrix measurement =
+                        new SimpleMatrix(
+                                new double[][]{
+                                        {range},
+                                        {azimuth}
+                                }
+                        );
+
+                batches
+                        .computeIfAbsent(
+                                timestampMs,
+                                ignored -> new LinkedHashMap<>()
+                        )
+                        .computeIfAbsent(
+                                sensorId,
+                                ignored -> new ArrayList<>()
+                        )
+                        .add(measurement);
+
+            } catch (Exception e) {
+                log.warn(
+                        "Unable to decode raw Kafka report: {}",
+                        e.getMessage()
+                );
+            }
+        }
+
+        for (Map.Entry<
+                Long,
+                Map<String, List<SimpleMatrix>>
+                > timeEntry : batches.entrySet()) {
+
+            long timestampMs = timeEntry.getKey();
+
+            for (Map.Entry<
+                    String,
+                    List<SimpleMatrix>
+                    > sensorEntry
+                    : timeEntry.getValue().entrySet()) {
+
+                String sensorId =
+                        sensorEntry.getKey();
+
+                MeasurementModel measurementModel =
+                        measurementModels.get(sensorId);
+
+                if (measurementModel == null) {
+                    continue;
+                }
+
+                trackManager.processObservations(
+                        sensorEntry.getValue(),
+                        measurementModel,
+                        sensorId,
+                        timestampMs
+                );
+            }
+        }
+
+        List<TrackingPipelineConsumer.KeyValue> output =
+                new ArrayList<>();
+
+        for (Track track : trackManager.getAllTracks()) {
+            try {
+                Map<String, Object> fused =
+                        encodeFusedTrack(track);
+
+                output.add(
+                        new TrackingPipelineConsumer.KeyValue(
+                                track.getTrackId(),
+                                mapper.writeValueAsBytes(fused)
+                        )
+                );
+
+            } catch (Exception e) {
+                log.warn(
+                        "Unable to encode fused track {}: {}",
+                        track.getTrackId(),
+                        e.getMessage()
+                );
+            }
+        }
+
+        /*
+         * Publish DROPPED records once before physically removing
+         * those tracks from memory.
+         */
+        trackManager.pruneDropped();
+
+        return output;
+    }
+
+    private Map<String, Object> encodeFusedTrack(Track track) {
+
+        double xM = track.getPx();
+        double yM = track.getPy();
+
+        /*
+         * Internal metric coordinates are kept explicitly for
+         * the spatial consumer.
+         *
+         * px/py remain WGS84 for API/UI compatibility.
+         */
+        double lng =
+                CENTER_LNG +
+                        xM / METERS_PER_DEG_LNG;
+
+        double lat =
+                CENTER_LAT +
+                        yM / METERS_PER_DEG_LAT;
+
+        Map<String, Object> fused =
+                new LinkedHashMap<>();
+
+        fused.put("trackId", track.getTrackId());
+
+        fused.put("xM", xM);
+        fused.put("yM", yM);
+
+        fused.put("px", lng);
+        fused.put("py", lat);
+
+        fused.put("vx", track.getVx());
+        fused.put("vy", track.getVy());
+
+        fused.put(
+                "state",
+                track.getState().name()
+        );
+
+        fused.put(
+                "uncertainty",
+                track.getPositionUncertainty()
+        );
+
+        fused.put(
+                "lastUpdateMs",
+                track.getLastUpdateMs()
+        );
+
+        fused.put(
+                "sourceTimestampMs",
+                track.getLastUpdateMs()
+        );
+
+        fused.put(
+                "contributingSensors",
+                List.copyOf(
+                        track.getContributingSensors()
+                )
+        );
+
+        SimpleMatrix covariance =
+                track.getEkf().getCovariance();
+
+        double pxx = covariance.get(0, 0);
+        double pyy = covariance.get(1, 1);
+        double pxy = covariance.get(0, 1);
+
+        double angle =
+                0.5 * Math.atan2(
+                        2 * pxy,
+                        pxx - pyy
+                );
+
+        double cos = Math.cos(angle);
+        double sin = Math.sin(angle);
+
+        double majorVariance =
+                pxx * cos * cos +
+                        2 * pxy * sin * cos +
+                        pyy * sin * sin;
+
+        double minorVariance =
+                pxx * sin * sin -
+                        2 * pxy * sin * cos +
+                        pyy * cos * cos;
+
+        double major =
+                Math.sqrt(
+                        Math.max(0, majorVariance)
+                );
+
+        double minor =
+                Math.sqrt(
+                        Math.max(0, minorVariance)
+                );
+
+        fused.put(
+                "ellipseMajor",
+                major * 2
+        );
+
+        fused.put(
+                "ellipseMinor",
+                minor * 2
+        );
+
+        fused.put(
+                "ellipseAngle",
+                Math.toDegrees(angle)
+        );
+
+        return fused;
+    }
+
+    /**
+     * Called exclusively by SpatialPipelineConsumer.
+     */
+    private List<SpatialPipelineConsumer.KeyValue> evaluateFusedTracks(
+            List<ConsumerRecord<String, byte[]>> records) {
+
+        List<SpatialPipelineConsumer.KeyValue> events =
+                new ArrayList<>();
+
+        for (ConsumerRecord<String, byte[]> record : records) {
+            try {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> track =
+                        mapper.readValue(
+                                record.value(),
+                                Map.class
+                        );
+
+                String trackId =
+                        String.valueOf(
+                                track.get("trackId")
+                        );
+
+                String state =
+                        String.valueOf(
+                                track.get("state")
+                        );
+
+                if ("DROPPED".equals(state)) {
+                    alertStateMachine.removeTrack(trackId);
+                    continue;
+                }
+
+                double xM =
+                        toDouble(track.get("xM"));
+
+                double yM =
+                        toDouble(track.get("yM"));
+
+                double lng =
+                        toDouble(track.get("px"));
+
+                double lat =
+                        toDouble(track.get("py"));
+
+                long timestampMs =
+                        toLong(track.get("lastUpdateMs"));
+
+                Map<String, ZoneClassification> classifications =
+                        geofenceEngine.classify(xM, yM);
+
+                for (Map.Entry<
+                        String,
+                        ZoneClassification
+                        > entry
+                        : classifications.entrySet()) {
+
+                    Optional<TrackEvent> transition =
+                            alertStateMachine.update(
+                                    trackId,
+                                    entry.getKey(),
+                                    entry.getValue(),
+                                    timestampMs,
+                                    xM,
+                                    yM
+                            );
+
+                    if (transition.isEmpty()) {
+                        continue;
+                    }
+
+                    TrackEvent event =
+                            transition.get();
+
+                    String identity =
+                            event.trackId() +
+                                    "|" +
+                                    event.zoneId() +
+                                    "|" +
+                                    event.type() +
+                                    "|" +
+                                    timestampMs;
+
+                    String eventId =
+                            UUID.nameUUIDFromBytes(
+                                            identity.getBytes(
+                                                    StandardCharsets.UTF_8
+                                            )
+                                    )
+                                    .toString()
+                                    .substring(0, 8);
+
+                    Map<String, Object> json =
+                            new LinkedHashMap<>();
+
+                    json.put("eventId", eventId);
+                    json.put(
+                            "trackId",
+                            event.trackId()
+                    );
+                    json.put(
+                            "zoneId",
+                            event.zoneId()
+                    );
+                    json.put(
+                            "type",
+                            event.type().name()
+                    );
+                    json.put(
+                            "timestampMs",
+                            event.timestampMs()
+                    );
+                    json.put(
+                            "previousState",
+                            event.previousState().name()
+                    );
+                    json.put(
+                            "newState",
+                            event.newState().name()
+                    );
+
+                    /*
+                     * Browser-facing coordinates.
+                     */
+                    json.put("px", lng);
+                    json.put("py", lat);
+
+                    /*
+                     * Internal metric coordinates retained for debugging.
+                     */
+                    json.put("xM", xM);
+                    json.put("yM", yM);
+
+                    events.add(
+                            new SpatialPipelineConsumer.KeyValue(
+                                    event.trackId() +
+                                            "|" +
+                                            event.zoneId(),
+                                    mapper.writeValueAsBytes(json)
+                            )
+                    );
+                }
+
+            } catch (Exception e) {
+                log.warn(
+                        "Unable to evaluate fused Kafka track: {}",
+                        e.getMessage()
+                );
+            }
+        }
+
+        return events;
+    }
+
+    private void buildSpatialEngine() {
         geofenceEngine = new GeofenceEngine();
-        alertSM = new AlertStateMachine();
-        GeometryFactory gf = new GeometryFactory();
-        // R-21: elliptical zone at (-117.05, 34.755) mapped to meters
-        // Using a circular polygon centered at the zone in metric space
-        double cLngRef = -117.15, cLatRef = 34.74;
-        double cx = (-117.05 - cLngRef) * 92000, cy = (34.755 - cLatRef) * 111000;
-        double rx = 0.06 * 92000, ry = 0.04 * 111000;
-        Coordinate[] coords = new Coordinate[65];
+        alertStateMachine = new AlertStateMachine();
+
+        GeometryFactory geometryFactory =
+                new GeometryFactory();
+
+        double cx =
+                (-117.05 - CENTER_LNG) *
+                        METERS_PER_DEG_LNG;
+
+        double cy =
+                (34.755 - CENTER_LAT) *
+                        METERS_PER_DEG_LAT;
+
+        double rx =
+                0.06 * METERS_PER_DEG_LNG;
+
+        double ry =
+                0.04 * METERS_PER_DEG_LAT;
+
+        Coordinate[] coordinates =
+                new Coordinate[65];
+
         for (int i = 0; i < 64; i++) {
-            double a = (i / 64.0) * Math.PI * 2;
-            coords[i] = new Coordinate(cx + Math.cos(a) * rx, cy + Math.sin(a) * ry);
+            double angle =
+                    (i / 64.0) *
+                            Math.PI *
+                            2;
+
+            coordinates[i] =
+                    new Coordinate(
+                            cx +
+                                    Math.cos(angle) *
+                                            rx,
+                            cy +
+                                    Math.sin(angle) *
+                                            ry
+                    );
         }
-        coords[64] = coords[0];
-        Polygon zonePoly = gf.createPolygon(coords);
-        geofenceEngine.addZone(new RestrictedZone("R-21", zonePoly, 500, 1000));
 
-        // Kafka producers
-        rawProducer = createProducer();
-        fusedProducer = createProducer();
-        eventProducer = createProducer();
+        coordinates[64] =
+                coordinates[0];
 
-        // Start simulation at ~15 Hz
-        simExecutor = Executors.newSingleThreadScheduledExecutor(
-                Thread.ofVirtual().name("pipeline-sim-", 0).factory());
-        simExecutor.scheduleAtFixedRate(this::tick, 1000, 70, TimeUnit.MILLISECONDS);
+        Polygon polygon =
+                geometryFactory.createPolygon(
+                        coordinates
+                );
 
-        log.info("Pipeline orchestrator running: {} targets, {} sensors, zone R-21 active",
-                world.getTargetCount(), sensors.size());
+        geofenceEngine.addZone(
+                new RestrictedZone(
+                        "R-21",
+                        polygon,
+                        500,
+                        1_000
+                )
+        );
+    }
+
+    private ScenarioConfig buildDemoScenario() {
+
+        List<ScenarioConfig.TargetSpec> targets =
+                List.of(
+                        new ScenarioConfig.TargetSpec(
+                                "TGT-01",
+                                0,
+                                (-0.15) * METERS_PER_DEG_LNG,
+                                0.05 * METERS_PER_DEG_LAT,
+                                25,
+                                -5,
+                                List.of(
+                                        ScenarioConfig.SegmentSpec.straight(15),
+                                        ScenarioConfig.SegmentSpec.turn(20, 0.02),
+                                        ScenarioConfig.SegmentSpec.straight(15)
+                                )
+                        ),
+
+                        new ScenarioConfig.TargetSpec(
+                                "TGT-02",
+                                0,
+                                0.12 * METERS_PER_DEG_LNG,
+                                0.06 * METERS_PER_DEG_LAT,
+                                -20,
+                                -10,
+                                List.of(
+                                        ScenarioConfig.SegmentSpec.straight(20),
+                                        ScenarioConfig.SegmentSpec.turn(15, -0.015),
+                                        ScenarioConfig.SegmentSpec.straight(15)
+                                )
+                        ),
+
+                        new ScenarioConfig.TargetSpec(
+                                "TGT-03",
+                                0,
+                                -0.05 * METERS_PER_DEG_LNG,
+                                -0.06 * METERS_PER_DEG_LAT,
+                                8,
+                                18,
+                                List.of(
+                                        ScenarioConfig.SegmentSpec.straight(15),
+                                        ScenarioConfig.SegmentSpec.turn(10, 0.03),
+                                        ScenarioConfig.SegmentSpec.straight(25)
+                                )
+                        ),
+
+                        new ScenarioConfig.TargetSpec(
+                                "TGT-04",
+                                2_000,
+                                0.08 * METERS_PER_DEG_LNG,
+                                0.02 * METERS_PER_DEG_LAT,
+                                -5,
+                                3,
+                                List.of(
+                                        ScenarioConfig.SegmentSpec.straight(20),
+                                        ScenarioConfig.SegmentSpec.turn(25, -0.01),
+                                        ScenarioConfig.SegmentSpec.straight(5)
+                                )
+                        ),
+
+                        new ScenarioConfig.TargetSpec(
+                                "TGT-05",
+                                1_000,
+                                -0.10 * METERS_PER_DEG_LNG,
+                                0.08 * METERS_PER_DEG_LAT,
+                                30,
+                                -15,
+                                List.of(
+                                        ScenarioConfig.SegmentSpec.straight(10),
+                                        ScenarioConfig.SegmentSpec.turn(15, 0.025),
+                                        ScenarioConfig.SegmentSpec.straight(25)
+                                )
+                        )
+                );
+
+        List<ScenarioConfig.SensorSpec> sensorSpecs =
+                List.of(
+                        new ScenarioConfig.SensorSpec(
+                                "SSA-01",
+                                (-117.35 - CENTER_LNG) *
+                                        METERS_PER_DEG_LNG,
+                                (34.79 - CENTER_LAT) *
+                                        METERS_PER_DEG_LAT,
+                                50,
+                                0.01,
+                                5,
+                                0.001,
+                                100,
+                                0.02
+                        ),
+
+                        new ScenarioConfig.SensorSpec(
+                                "SSB-02",
+                                (-117.38 - CENTER_LNG) *
+                                        METERS_PER_DEG_LNG,
+                                (34.71 - CENTER_LAT) *
+                                        METERS_PER_DEG_LAT,
+                                50,
+                                0.01,
+                                5,
+                                0.001,
+                                100,
+                                0.02
+                        ),
+
+                        new ScenarioConfig.SensorSpec(
+                                "SSC-03",
+                                (-117.05 - CENTER_LNG) *
+                                        METERS_PER_DEG_LNG,
+                                (34.68 - CENTER_LAT) *
+                                        METERS_PER_DEG_LAT,
+                                50,
+                                0.01,
+                                5,
+                                0.001,
+                                100,
+                                0.02
+                        )
+                );
+
+        return new ScenarioConfig(
+                "demo-live",
+                42L,
+                50_000L,
+                targets,
+                sensorSpecs,
+                new ScenarioConfig.ImpairmentSpec(
+                        0.0,
+                        0.0,
+                        0,
+                        0,
+                        false
+                )
+        );
+    }
+
+    public long getGatewayPacketsAccepted() {
+        return gatewayMetrics == null
+                ? 0
+                : gatewayMetrics.getPacketsAccepted();
+    }
+
+    public long getGatewayPacketsDropped() {
+        return gatewayMetrics == null
+                ? 0
+                : gatewayMetrics.getPacketsDropped();
+    }
+
+    public long getGatewayPacketsReceived() {
+        return gatewayMetrics == null
+                ? 0
+                : gatewayMetrics.getPacketsReceived();
     }
 
     @PreDestroy
     public void stop() {
-        running.set(false);
-        if (simExecutor != null) simExecutor.shutdownNow();
-        if (pipelineExecutor != null) pipelineExecutor.shutdownNow();
-        if (rawProducer != null) rawProducer.close();
-        if (fusedProducer != null) fusedProducer.close();
-        if (eventProducer != null) eventProducer.close();
-        log.info("Pipeline orchestrator stopped at simTime={}ms", simTimeMs);
-    }
-
-    /**
-     * One simulation tick: advance time, generate observations, run tracking
-     * and spatial, publish to Kafka.
-     */
-    private void tick() {
-        if (!running.get()) return;
-        simTimeMs += 100; // 100ms increments
-        long wallMs = System.currentTimeMillis();
-
-        // 1. Get ground truth
-        List<TargetModel.TruthRecord> truth = world.truthAt(simTimeMs);
-        if (truth.isEmpty()) {
-            // Scenario ended, loop it
-            simTimeMs = 0;
+        if (!running.getAndSet(false)) {
             return;
         }
 
-        // 2. Generate sensor observations and publish raw to Kafka
-        List<SimpleMatrix> allMeasurements = new ArrayList<>();
-        String sensorId = null;
-        MeasurementModel mm = null;
-
-        for (int s = 0; s < sensors.size(); s++) {
-            SensorNode sensor = sensors.get(s);
-            List<SensorNode.RawReport> reports = sensor.observe(truth, simTimeMs, rng);
-            mm = sensorModels.get(s);
-            sensorId = sensor.getSensorId();
-
-            for (SensorNode.RawReport r : reports) {
-                // Publish raw report to Kafka
-                String csv = "%s,%d,%.6f,%.6f,%.6f,%.6f,%.6f,%d".formatted(
-                        r.sensorId(), r.timestampMs(),
-                        r.sensorX(), r.sensorY(),
-                        r.rangeM(), r.azimuthRad(),
-                        r.signalStrength(), r.sequenceNumber());
-                rawProducer.send(new ProducerRecord<>(RAW_TOPIC, r.sensorId(), csv.getBytes()));
-
-                if (!r.isFalseDetection()) {
-                    allMeasurements.add(new SimpleMatrix(new double[][]{{r.rangeM()}, {r.azimuthRad()}}));
-                }
-            }
-
-            // 3. Run tracking (process each sensor's batch)
-            if (!allMeasurements.isEmpty() && mm != null) {
-                trackManager.processObservations(allMeasurements, mm, sensorId, simTimeMs);
-                allMeasurements.clear();
-            }
+        if (simExecutor != null) {
+            simExecutor.shutdownNow();
         }
 
-        // 4. Publish fused tracks to Kafka + run spatial
-        for (Track track : trackManager.getAllTracks()) {
-            if (!track.isAlive()) continue;
+        if (udpSocket != null) {
+            udpSocket.close();
+        }
 
-            try {
-                // Convert EKF meters back to WGS84 degrees for the UI
-                double cLng = -117.15, cLat = 34.74;
-                double mPerDegLng = 92000, mPerDegLat = 111000;
+        if (gatewayServer != null) {
+            gatewayServer.stop();
+        }
 
-                Map<String, Object> fused = new LinkedHashMap<>();
-                fused.put("trackId", track.getTrackId());
-                fused.put("px", cLng + track.getPx() / mPerDegLng);
-                fused.put("py", cLat + track.getPy() / mPerDegLat);
-                fused.put("vx", track.getVx());
-                fused.put("vy", track.getVy());
-                fused.put("state", track.getState().name());
-                fused.put("uncertainty", track.getPositionUncertainty());
-                fused.put("lastUpdateMs", wallMs);
-                fused.put("contributingSensors", List.copyOf(track.getContributingSensors()));
+        if (trackingConsumer != null) {
+            trackingConsumer.stop();
+        }
 
-                // Covariance ellipse from P matrix
-                SimpleMatrix P = track.getEkf().getCovariance();
-                double pxx = P.get(0, 0), pyy = P.get(1, 1), pxy = P.get(0, 1);
-                double angle = 0.5 * Math.atan2(2 * pxy, pxx - pyy);
-                double cos2 = Math.cos(angle) * Math.cos(angle);
-                double sin2 = Math.sin(angle) * Math.sin(angle);
-                double sincos = Math.sin(angle) * Math.cos(angle);
-                double major = Math.sqrt(pxx * cos2 + 2 * pxy * sincos + pyy * sin2);
-                double minor = Math.sqrt(pxx * sin2 - 2 * pxy * sincos + pyy * cos2);
-                fused.put("ellipseMajor", major * 2);
-                fused.put("ellipseMinor", minor * 2);
-                fused.put("ellipseAngle", Math.toDegrees(angle));
+        if (spatialConsumer != null) {
+            spatialConsumer.stop();
+        }
 
-                byte[] json = mapper.writeValueAsBytes(fused);
-                fusedProducer.send(new ProducerRecord<>(FUSED_TOPIC, track.getTrackId(), json));
+        joinQuietly(trackingThread);
+        joinQuietly(spatialThread);
 
-                // 5. Geofence evaluation
-                Map<String, ZoneClassification> zones = geofenceEngine.classify(
-                        track.getPx(), track.getPy());
-                for (var entry : zones.entrySet()) {
-                    Optional<TrackEvent> evt = alertSM.update(
-                            track.getTrackId(), entry.getKey(),
-                            entry.getValue(), wallMs,
-                            track.getPx(), track.getPy());
-                    if (evt.isPresent()) {
-                        TrackEvent te = evt.get();
-                        Map<String, Object> evMap = new LinkedHashMap<>();
-                        evMap.put("eventId", UUID.randomUUID().toString().substring(0, 8));
-                        evMap.put("trackId", te.trackId());
-                        evMap.put("zoneId", te.zoneId());
-                        evMap.put("type", te.type().name());
-                        evMap.put("timestampMs", te.timestampMs());
-                        evMap.put("previousState", te.previousState().name());
-                        evMap.put("newState", te.newState().name());
-                        evMap.put("px", te.px());
-                        evMap.put("py", te.py());
+        if (gatewayProducer != null) {
+            gatewayProducer.close();
+        }
 
-                        byte[] evJson = mapper.writeValueAsBytes(evMap);
-                        eventProducer.send(new ProducerRecord<>(EVENT_TOPIC,
-                                te.trackId() + "|" + te.zoneId(), evJson));
-                    }
-                }
-            } catch (Exception e) {
-                log.warn("Failed to publish track {}: {}", track.getTrackId(), e.getMessage());
-            }
+        log.info(
+                "Full pipeline stopped at simTime={}ms",
+                simTimeMs
+        );
+    }
+
+    private static void joinQuietly(Thread thread) {
+        if (thread == null) {
+            return;
+        }
+
+        try {
+            thread.join(1_000);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
         }
     }
 
-    /**
-     * Build a demo scenario with 5 targets and 3 sensors that matches
-     * the UI's map viewport (lng/lat mapped to meters).
-     */
-    private ScenarioConfig buildDemoScenario() {
-        // Map center: (-117.15, 34.74) -> treat as origin in meters
-        // Scale: 1 degree lng ~ 92km at lat 34.7, 1 degree lat ~ 111km
-        double cLng = -117.15, cLat = 34.74;
-        double mPerDegLng = 92000, mPerDegLat = 111000;
+    private static double toDouble(Object value) {
+        if (value instanceof Number number) {
+            return number.doubleValue();
+        }
 
-        List<ScenarioConfig.TargetSpec> targets = List.of(
-                // Target 1: sweeps east, turns south
-                new ScenarioConfig.TargetSpec("TGT-01", 0,
-                        (cLng - 0.15 - cLng) * mPerDegLng, (cLat + 0.05 - cLat) * mPerDegLat,
-                        25, -5, List.of(
-                        ScenarioConfig.SegmentSpec.straight(15),
-                        ScenarioConfig.SegmentSpec.turn(20, 0.02),
-                        ScenarioConfig.SegmentSpec.straight(15))),
-                // Target 2: sweeps west from east side
-                new ScenarioConfig.TargetSpec("TGT-02", 0,
-                        (cLng + 0.12 - cLng) * mPerDegLng, (cLat + 0.06 - cLat) * mPerDegLat,
-                        -20, -10, List.of(
-                        ScenarioConfig.SegmentSpec.straight(20),
-                        ScenarioConfig.SegmentSpec.turn(15, -0.015),
-                        ScenarioConfig.SegmentSpec.straight(15))),
-                // Target 3: northbound, turns east toward zone
-                new ScenarioConfig.TargetSpec("TGT-03", 0,
-                        (cLng - 0.05 - cLng) * mPerDegLng, (cLat - 0.06 - cLat) * mPerDegLat,
-                        8, 18, List.of(
-                        ScenarioConfig.SegmentSpec.straight(15),
-                        ScenarioConfig.SegmentSpec.turn(10, 0.03),
-                        ScenarioConfig.SegmentSpec.straight(25))),
-                // Target 4: slow mover, starts near zone
-                new ScenarioConfig.TargetSpec("TGT-04", 2000,
-                        (cLng + 0.08 - cLng) * mPerDegLng, (cLat + 0.02 - cLat) * mPerDegLat,
-                        -5, 3, List.of(
-                        ScenarioConfig.SegmentSpec.straight(20),
-                        ScenarioConfig.SegmentSpec.turn(25, -0.01),
-                        ScenarioConfig.SegmentSpec.straight(5))),
-                // Target 5: fast diagonal
-                new ScenarioConfig.TargetSpec("TGT-05", 1000,
-                        (cLng - 0.10 - cLng) * mPerDegLng, (cLat + 0.08 - cLat) * mPerDegLat,
-                        30, -15, List.of(
-                        ScenarioConfig.SegmentSpec.straight(10),
-                        ScenarioConfig.SegmentSpec.turn(15, 0.025),
-                        ScenarioConfig.SegmentSpec.straight(25)))
+        return Double.parseDouble(
+                String.valueOf(value)
         );
-
-        // 3 sensors matching the UI positions
-        List<ScenarioConfig.SensorSpec> sensorSpecs = List.of(
-                new ScenarioConfig.SensorSpec("SSA-01",
-                        (-117.35 - cLng) * mPerDegLng, (34.79 - cLat) * mPerDegLat,
-                        50, 0.01, 5, 0.001, 100, 0.02),
-                new ScenarioConfig.SensorSpec("SSB-02",
-                        (-117.38 - cLng) * mPerDegLng, (34.71 - cLat) * mPerDegLat,
-                        50, 0.01, 5, 0.001, 100, 0.02),
-                new ScenarioConfig.SensorSpec("SSC-03",
-                        (-117.05 - cLng) * mPerDegLng, (34.68 - cLat) * mPerDegLat,
-                        50, 0.01, 5, 0.001, 100, 0.02)
-        );
-
-        return new ScenarioConfig("demo-live", 42L, 50_000L, targets, sensorSpecs,
-                new ScenarioConfig.ImpairmentSpec(0.0, 0.0, 0, 0, false));
     }
 
-    private KafkaProducer<String, byte[]> createProducer() {
-        Properties props = new Properties();
-        props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
-        props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class.getName());
-        props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, ByteArraySerializer.class.getName());
-        props.put(ProducerConfig.ACKS_CONFIG, "1");
-        props.put(ProducerConfig.LINGER_MS_CONFIG, 5);
-        return new KafkaProducer<>(props);
+    private static long toLong(Object value) {
+        if (value instanceof Number number) {
+            return number.longValue();
+        }
+
+        return Long.parseLong(
+                String.valueOf(value)
+        );
     }
 }

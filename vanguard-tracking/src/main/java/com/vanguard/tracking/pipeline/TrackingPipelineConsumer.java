@@ -2,6 +2,7 @@ package com.vanguard.tracking.pipeline;
 
 import org.apache.kafka.clients.consumer.*;
 import org.apache.kafka.clients.producer.*;
+import org.apache.kafka.common.errors.WakeupException;
 import org.apache.kafka.common.serialization.ByteArrayDeserializer;
 import org.apache.kafka.common.serialization.ByteArraySerializer;
 import org.apache.kafka.common.serialization.StringDeserializer;
@@ -60,7 +61,7 @@ public class TrackingPipelineConsumer implements Runnable {
         consumerProps.put(ConsumerConfig.GROUP_ID_CONFIG, groupId);
         consumerProps.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
         consumerProps.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, ByteArrayDeserializer.class.getName());
-        consumerProps.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+        consumerProps.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "latest");
         consumerProps.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "true");
         consumerProps.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, 500);
         this.consumer = new KafkaConsumer<>(consumerProps);
@@ -97,6 +98,10 @@ public class TrackingPipelineConsumer implements Runnable {
                             });
                 }
             }
+        } catch (WakeupException e) {
+            if (running.get()) {
+                throw e;
+            }
         } finally {
             consumer.close();
             producer.close();
@@ -105,7 +110,10 @@ public class TrackingPipelineConsumer implements Runnable {
         }
     }
 
-    public void stop() { running.set(false); }
+    public void stop() {
+        running.set(false);
+        consumer.wakeup();
+    }
     public long getConsumed() { return consumed.sum(); }
     public long getProduced() { return produced.sum(); }
 }

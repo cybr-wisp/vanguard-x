@@ -2,6 +2,7 @@ package com.vanguard.spatial.kafka;
 
 import org.apache.kafka.clients.consumer.*;
 import org.apache.kafka.clients.producer.*;
+import org.apache.kafka.common.errors.WakeupException;
 import org.apache.kafka.common.serialization.ByteArrayDeserializer;
 import org.apache.kafka.common.serialization.ByteArraySerializer;
 import org.apache.kafka.common.serialization.StringDeserializer;
@@ -54,7 +55,7 @@ public class SpatialPipelineConsumer implements Runnable {
         cp.put(ConsumerConfig.GROUP_ID_CONFIG, groupId);
         cp.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
         cp.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, ByteArrayDeserializer.class.getName());
-        cp.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+        cp.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "latest");
         cp.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "true");
         this.consumer = new KafkaConsumer<>(cp);
 
@@ -88,6 +89,10 @@ public class SpatialPipelineConsumer implements Runnable {
                             });
                 }
             }
+        } catch (WakeupException e) {
+            if (running.get()) {
+                throw e;
+            }
         } finally {
             consumer.close();
             producer.close();
@@ -96,7 +101,10 @@ public class SpatialPipelineConsumer implements Runnable {
         }
     }
 
-    public void stop() { running.set(false); }
+    public void stop() {
+        running.set(false);
+        consumer.wakeup();
+    }
     public long getConsumed() { return consumed.sum(); }
     public long getEventsPublished() { return eventsPublished.sum(); }
 }
