@@ -137,18 +137,22 @@ public class KafkaWebSocketBridge {
                         double uncertainty = toDouble(track.get("uncertainty"));
                         long lastUpdateMs = toLong(track.get("lastUpdateMs"));
 
-                        // Persist to Redis
-                        if ("DROPPED".equals(state)) {
-                            trackRepo.removeTrack(trackId);
-                            trackStates.remove(trackId);
-                        } else {
-                            trackRepo.updateTrack(trackId, px, py, vx, vy,
-                                    state, uncertainty, lastUpdateMs);
+                         // Broadcast to WebSocket clients first
+                        trackHandler.broadcast(json);
+
+                        // Persist to Redis (best-effort)
+                        try {
+                            if ("DROPPED".equals(state)) {
+                                trackRepo.removeTrack(trackId);
+                                trackStates.remove(trackId);
+                            } else {
+                                trackRepo.updateTrack(trackId, px, py, vx, vy,
+                                        state, uncertainty, lastUpdateMs);
+                                trackStates.put(trackId, state);
+                            }
+                        } catch (Exception redisErr) {
                             trackStates.put(trackId, state);
                         }
-
-                        // Broadcast to WebSocket clients
-                        trackHandler.broadcast(json);
 
                         tracksConsumed.increment();
                         reportsInWindow.increment();
