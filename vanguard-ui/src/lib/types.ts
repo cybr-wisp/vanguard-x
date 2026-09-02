@@ -1,72 +1,89 @@
 /** Fused track state from the backend WebSocket. */
 export interface FusedTrack {
-  trackId: string;
-  px: number;
-  py: number;
-  vx: number;
-  vy: number;
-  state: 'TENTATIVE' | 'CONFIRMED' | 'COASTING' | 'DROPPED';
-  uncertainty: number;
-  lastUpdateMs: number;
-  contributingSensors: string[];
-  // Covariance ellipse parameters (computed from P matrix)
-  ellipseMajor?: number;
-  ellipseMinor?: number;
-  ellipseAngle?: number;
+  trackId: string
+  px: number
+  py: number
+  vx: number
+  vy: number
+  state: 'TENTATIVE' | 'CONFIRMED' | 'COASTING' | 'DROPPED'
+  uncertainty: number
+  lastUpdateMs: number
+  contributingSensors: string[]
+  ellipseMajor?: number
+  ellipseMinor?: number
+  ellipseAngle?: number
 }
 
-/** Raw sensor observation (for displaying scatter). */
+/** Raw sensor observation retained for legacy component compatibility. */
 export interface RawObservation {
-  sensorId: string;
-  timestampMs: number;
-  sensorX: number;
-  sensorY: number;
-  range: number;
-  azimuth: number;
-  // Cartesian conversion for rendering
-  px: number;
-  py: number;
+  sensorId: string
+  timestampMs: number
+  sensorX: number
+  sensorY: number
+  range: number
+  azimuth: number
+  px: number
+  py: number
 }
 
-/** Track event from zone transitions. */
+/** Track event from the spatial / geofence pipeline. */
 export interface TrackEvent {
-  eventId: string;
-  type: 'ZONE_APPROACH' | 'ZONE_ENTRY' | 'ZONE_EXIT';
-  trackId: string;
-  zoneId: string;
-  timestampMs: number;
-  previousState: string;
-  newState: string;
-  px: number;
-  py: number;
+  eventId: string
+  type: 'ZONE_APPROACH' | 'ZONE_ENTRY' | 'ZONE_EXIT'
+  trackId: string
+  zoneId: string
+  timestampMs: number
+  previousState: string
+  newState: string
+  px: number
+  py: number
 }
 
-/** Restricted zone definition. */
 export interface RestrictedZone {
-  zoneId: string;
-  polygon: [number, number][];
-  warningBufferM: number;
-  advisoryBufferM: number;
+  zoneId: string
+  polygon: [number, number][]
+  warningBufferM: number
+  advisoryBufferM: number
 }
 
-/** System metrics snapshot. */
+/** Backend-owned map geometry from GET /api/zones. */
+export interface ZoneDefinition {
+  zoneId: string
+  label: string
+  color: string
+  center: [number, number]
+  warningBufferM: number
+  advisoryBufferM: number
+  core: [number, number][]
+  warning: [number, number][]
+  advisory: [number, number][]
+}
+
+/** /ws/health payload emitted by KafkaWebSocketBridge. */
 export interface SystemMetrics {
-  throughputReportsPerSec: number;
-  p50LatencyMs: number;
-  p95LatencyMs: number;
-  p99LatencyMs: number;
-  activeTracks: number;
-  confirmedTracks: number;
-  coastingTracks: number;
-  queueDepth: number;
-  kafkaLag: number;
-  packetsDropped: number;
-  uptimeMs: number;
+  throughputReportsPerSec: number
+  p50LatencyMs: number
+  p95LatencyMs: number
+  p99LatencyMs: number
+  activeTracks: number
+  confirmedTracks: number
+  coastingTracks: number
+  queueDepth: number
+  kafkaLag: number
+  packetsDropped: number
+  uptimeMs: number
+
+  gatewayPacketsReceived?: number
+  gatewayPacketsAccepted?: number
+  trackKafkaLag?: number
+  eventKafkaLag?: number
+  pendingTrackPersistence?: number
+  pendingTrackBroadcasts?: number
+  trackPersistenceSkipped?: number
 }
 
-/** Sensor position for the sensor layer. */
 export interface SensorPosition {
-  sensorId: string;
-  x: number;
-  y: number;
+  sensorId: string
+  x: number
+  y: number
 }

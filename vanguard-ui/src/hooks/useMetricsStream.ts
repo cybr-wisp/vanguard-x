@@ -1,10 +1,16 @@
 import { useEffect, useState } from 'react';
 import type { SystemMetrics } from '../lib/types';
 
-const WS_HOST = `ws://${window.location.hostname}:8081`;
+const BACKEND_HOST =
+  (import.meta.env.VITE_BACKEND_HOST as string | undefined)?.trim()
+  || `${window.location.hostname}:8081`;
+
+const WS_SCHEME = window.location.protocol === 'https:' ? 'wss' : 'ws';
+const WS_HOST = `${WS_SCHEME}://${BACKEND_HOST}`;
 
 let globalMetrics: SystemMetrics | null = null;
 let globalConnected = false;
+let globalLastMessageMs = 0;
 let listeners: Array<() => void> = [];
 let started = false;
 
@@ -18,18 +24,28 @@ function startHealthSocket() {
 
   function connect() {
     const ws = new WebSocket(`${WS_HOST}/ws/health`);
-    ws.onopen = () => { globalConnected = true; notify(); };
+
+    ws.onopen = () => {
+      globalConnected = true;
+      notify();
+    };
+
     ws.onmessage = (msg) => {
       try {
         globalMetrics = JSON.parse(msg.data);
+        globalLastMessageMs = Date.now();
         notify();
-      } catch (e) {}
+      } catch {
+        // Ignore malformed server messages.
+      }
     };
+
     ws.onclose = () => {
       globalConnected = false;
       notify();
-      setTimeout(connect, 3000);
+      window.setTimeout(connect, 3_000);
     };
+
     ws.onerror = () => ws.close();
   }
 
@@ -41,12 +57,18 @@ export function useMetricsStream() {
 
   useEffect(() => {
     startHealthSocket();
+
     const listener = () => forceUpdate(n => n + 1);
     listeners.push(listener);
+
     return () => {
-      listeners = listeners.filter(l => l !== listener);
+      listeners = listeners.filter(existing => existing !== listener);
     };
   }, []);
 
-  return { metrics: globalMetrics, connected: globalConnected };
+  return {
+    metrics: globalMetrics,
+    connected: globalConnected,
+    lastMessageMs: globalLastMessageMs,
+  };
 }

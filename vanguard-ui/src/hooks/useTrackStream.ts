@@ -1,12 +1,19 @@
 import { useEffect, useState } from 'react';
 import type { FusedTrack, TrackEvent } from '../lib/types';
 
-const WS_HOST = `ws://${window.location.hostname}:8081`;
+const BACKEND_HOST =
+  (import.meta.env.VITE_BACKEND_HOST as string | undefined)?.trim()
+  || `${window.location.hostname}:8081`;
 
-// Module-level singleton state -- survives React re-renders and HMR
+const WS_SCHEME = window.location.protocol === 'https:' ? 'wss' : 'ws';
+const WS_HOST = `${WS_SCHEME}://${BACKEND_HOST}`;
+
 let globalTracks = new Map<string, FusedTrack>();
 let globalEvents: TrackEvent[] = [];
-let globalConnected = false;
+let globalTrackConnected = false;
+let globalEventConnected = false;
+let globalLastTrackMessageMs = 0;
+let globalLastEventMessageMs = 0;
 let listeners: Array<() => void> = [];
 let started = false;
 
@@ -20,37 +27,66 @@ function startWebSockets() {
 
   function connectTracks() {
     const ws = new WebSocket(`${WS_HOST}/ws/tracks`);
-    ws.onopen = () => { globalConnected = true; notify(); };
+
+    ws.onopen = () => {
+      globalTrackConnected = true;
+      notify();
+    };
+
     ws.onmessage = (msg) => {
       try {
         const track: FusedTrack = JSON.parse(msg.data);
+        globalLastTrackMessageMs = Date.now();
+
         if (track.state === 'DROPPED') {
           globalTracks.delete(track.trackId);
         } else {
           globalTracks.set(track.trackId, track);
         }
+
         globalTracks = new Map(globalTracks);
         notify();
-      } catch (e) {}
+      } catch {
+        // Ignore malformed server messages; transport state remains intact.
+      }
     };
+
     ws.onclose = () => {
-      globalConnected = false;
+      globalTrackConnected = false;
       notify();
-      setTimeout(connectTracks, 2000);
+      window.setTimeout(connectTracks, 2_000);
     };
+
     ws.onerror = () => ws.close();
   }
 
   function connectEvents() {
     const ws = new WebSocket(`${WS_HOST}/ws/events`);
+
+    ws.onopen = () => {
+      globalEventConnected = true;
+      notify();
+    };
+
     ws.onmessage = (msg) => {
       try {
         const event: TrackEvent = JSON.parse(msg.data);
-        globalEvents = [...globalEvents.slice(-200), event];
+        globalLastEventMessageMs = Date.now();
+
+        const withoutDuplicate = globalEvents.filter(existing => existing.eventId !== event.eventId);
+        globalEvents = [...withoutDuplicate.slice(-499), event];
         notify();
-      } catch (e) {}
+      } catch {
+        // Ignore malformed server messages.
+      }
     };
-    ws.onclose = () => setTimeout(connectEvents, 2000);
+
+    ws.onclose = () => {
+      globalEventConnected = false;
+      notify();
+      window.setTimeout(connectEvents, 2_000);
+    };
+
     ws.onerror = () => ws.close();
   }
 
@@ -63,17 +99,22 @@ export function useTrackStream() {
 
   useEffect(() => {
     startWebSockets();
+
     const listener = () => forceUpdate(n => n + 1);
     listeners.push(listener);
+
     return () => {
-      listeners = listeners.filter(l => l !== listener);
+      listeners = listeners.filter(existing => existing !== listener);
     };
   }, []);
 
   return {
     tracks: globalTracks,
     events: globalEvents,
-    connected: globalConnected,
-    lastUpdateMs: Date.now(),
+    connected: globalTrackConnected && globalEventConnected,
+    trackConnected: globalTrackConnected,
+    eventConnected: globalEventConnected,
+    lastTrackMessageMs: globalLastTrackMessageMs,
+    lastEventMessageMs: globalLastEventMessageMs,
   };
 }
