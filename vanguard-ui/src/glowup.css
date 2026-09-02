@@ -1,0 +1,661 @@
+﻿:root {
+  --vx-bg: #070c0d;
+  --vx-shell: #091012;
+  --vx-panel: #0c1517;
+  --vx-panel-2: #101a1c;
+  --vx-border: rgba(171, 187, 176, 0.15);
+
+  --vx-text: #e5e8df;
+  --vx-muted: #89968e;
+  --vx-dim: #59665f;
+
+  --vx-accent: #9eb2a4;
+  --vx-green: #64d88b;
+  --vx-amber: #e2b55e;
+  --vx-red: #ef6872;
+}
+
+/* ============================================================
+   TYPOGRAPHY
+   ============================================================ */
+
+html,
+body,
+#root,
+button,
+input {
+  font-family:
+    "Segoe UI Variable",
+    "Bahnschrift",
+    "Segoe UI",
+    Arial,
+    sans-serif !important;
+}
+
+body {
+  letter-spacing: -0.005em;
+}
+
+.mono {
+  font-family:
+    "Cascadia Mono",
+    "SFMono-Regular",
+    Consolas,
+    monospace !important;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ============================================================
+   MAIN SHELL
+   ============================================================ */
+
+html,
+body,
+#root,
+.app {
+  background: var(--vx-bg) !important;
+}
+
+.app {
+  grid-template-rows: 64px minmax(0, 1fr) !important;
+}
+
+.topbar,
+.sidebar,
+.right-rail,
+.bottom-dashboard {
+  background: var(--vx-shell) !important;
+}
+
+.topbar {
+  padding: 6px 11px !important;
+  border-bottom: 1px solid var(--vx-border) !important;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.30) !important;
+}
+
+.app-body {
+  grid-template-columns: 176px minmax(0, 1fr) !important;
+}
+
+.workspace {
+  grid-template-columns: minmax(0, 1fr) 356px !important;
+}
+
+/* ============================================================
+   BRAND
+   ============================================================ */
+
+.brand {
+  gap: 10px !important;
+}
+
+.brand-mark {
+  width: 34px !important;
+  height: 34px !important;
+  border-radius: 3px !important;
+  border: 1px solid rgba(148, 175, 158, 0.30) !important;
+  color: #a8b9ad !important;
+  background: rgba(112, 150, 132, 0.07) !important;
+}
+
+.brand-title {
+  font-family:
+    "Bahnschrift",
+    "Segoe UI Variable",
+    sans-serif !important;
+
+  font-size: 19px !important;
+  font-weight: 650 !important;
+  letter-spacing: 0.8px !important;
+}
+
+.brand-title span {
+  color: #acbdb0 !important;
+}
+
+.brand-subtitle {
+  margin-top: 4px !important;
+  color: #64736c !important;
+  font-size: 9.5px !important;
+}
+
+/* ============================================================
+   REMOVE GENERIC SAAS CARD FEEL
+   ============================================================ */
+
+.mission-block,
+.service-badge,
+.header-stats,
+.operator,
+.icon-button,
+.health-card,
+.metric-card,
+.sensor-card,
+.big-metric,
+.trend-panel,
+.benchmark-reference {
+  border-radius: 2px !important;
+  box-shadow: none !important;
+}
+
+.mission-block,
+.service-badge,
+.header-stats,
+.operator {
+  background: rgba(12, 22, 24, 0.86) !important;
+  border-color: var(--vx-border) !important;
+}
+
+.service-strip {
+  gap: 3px !important;
+}
+
+.service-badge {
+  padding: 5px 8px !important;
+}
+
+.header-stat {
+  border-right-color: var(--vx-border) !important;
+}
+
+.status-dot,
+.service-dot {
+  box-shadow: none !important;
+}
+
+/* ============================================================
+   NAVIGATION
+   ============================================================ */
+
+.sidebar {
+  border-right-color: var(--vx-border) !important;
+}
+
+.nav-list {
+  padding: 6px 0 !important;
+}
+
+.nav-item {
+  min-height: 39px !important;
+  padding: 9px 15px !important;
+
+  color: #748179 !important;
+  border-left-width: 2px !important;
+
+  font-size: 11px !important;
+}
+
+.nav-item:hover {
+  color: #c5ccc6 !important;
+  background: rgba(255, 255, 255, 0.025) !important;
+}
+
+.nav-item.active {
+  color: #d8ddd8 !important;
+  background: rgba(126, 157, 141, 0.09) !important;
+  border-left-color: #95aa9c !important;
+  font-weight: 600 !important;
+}
+
+/* ============================================================
+   MAP
+   ============================================================ */
+
+.primary-panel {
+  background: #080d0d !important;
+}
+
+.map-view {
+  background: #080d0d !important;
+}
+
+.map-canvas {
+  filter:
+    saturate(0.92)
+    contrast(1.05)
+    brightness(0.96);
+}
+
+/* MapLibre controls */
+
+.maplibregl-ctrl-group {
+  border-radius: 2px !important;
+  border: 1px solid rgba(207, 216, 205, 0.24) !important;
+
+  background: rgba(9, 16, 17, 0.88) !important;
+
+  box-shadow:
+    0 5px 18px rgba(0, 0, 0, 0.32) !important;
+}
+
+.maplibregl-ctrl-group button {
+  filter:
+    invert(0.82)
+    sepia(0.1) !important;
+}
+
+.maplibregl-ctrl-scale {
+  background: rgba(7, 13, 14, 0.75) !important;
+  color: #d0d6cf !important;
+
+  border-color: #9ca79d !important;
+}
+
+.maplibregl-ctrl-attrib {
+  background: rgba(5, 10, 11, 0.70) !important;
+  color: #939c95 !important;
+}
+
+.maplibregl-ctrl-attrib a {
+  color: #b3bbb4 !important;
+}
+
+/* ============================================================
+   MAP TOOLBAR
+   ============================================================ */
+
+.map-toolbar {
+  top: 12px !important;
+  left: 12px !important;
+
+  border-radius: 2px !important;
+
+  background: rgba(7, 14, 15, 0.82) !important;
+
+  border:
+    1px solid rgba(194, 204, 193, 0.22) !important;
+
+  box-shadow:
+    0 6px 20px rgba(0, 0, 0, 0.28) !important;
+
+  backdrop-filter: blur(8px);
+}
+
+.map-toggle {
+  width: 39px !important;
+  height: 35px !important;
+
+  color: #939e96 !important;
+
+  border-right-color:
+    rgba(200, 210, 198, 0.12) !important;
+}
+
+.map-toggle.active {
+  color: #e2e7df !important;
+
+  background:
+    rgba(137, 163, 147, 0.18) !important;
+}
+
+/* ============================================================
+   CONNECTION / ZONE LABELS
+   ============================================================ */
+
+.connection-banner {
+  border-radius: 2px !important;
+
+  background:
+    rgba(77, 24, 27, 0.90) !important;
+
+  border-color:
+    rgba(235, 105, 113, 0.62) !important;
+
+  backdrop-filter: blur(7px);
+}
+
+.zone-caption {
+  border-radius: 2px !important;
+
+  background:
+    rgba(7, 14, 15, 0.77) !important;
+
+  color: #ef8a90 !important;
+
+  border-color:
+    rgba(222, 119, 124, 0.25) !important;
+
+  box-shadow: none !important;
+
+  backdrop-filter: blur(6px);
+}
+
+.zone-caption span {
+  color: #8a948c !important;
+}
+
+/* ============================================================
+   LEGEND
+   ============================================================ */
+
+.map-legend {
+  width: 158px !important;
+
+  border-radius: 2px !important;
+
+  background:
+    rgba(6, 13, 14, 0.82) !important;
+
+  border:
+    1px solid rgba(198, 208, 196, 0.20) !important;
+
+  box-shadow:
+    0 6px 20px rgba(0, 0, 0, 0.28) !important;
+
+  backdrop-filter: blur(7px);
+}
+
+.legend-row {
+  color: #c0c8c1 !important;
+}
+
+/* ============================================================
+   AIRCRAFT / TRACKS
+   ============================================================ */
+
+.track-overlay {
+  filter:
+    drop-shadow(
+      0 1px 1px rgba(0, 0, 0, 0.75)
+    );
+}
+
+.aircraft-glyph {
+  filter:
+    drop-shadow(
+      0 0 3px rgba(255, 255, 255, 0.18)
+    );
+}
+
+.track-group:hover .aircraft-glyph {
+  filter:
+    drop-shadow(
+      0 0 3px rgba(255, 255, 255, 0.35)
+    )
+    drop-shadow(
+      0 0 7px currentColor
+    );
+}
+
+/* ============================================================
+   RIGHT RAIL
+   ============================================================ */
+
+.right-rail {
+  border-left-color: var(--vx-border) !important;
+}
+
+.rail-section {
+  padding: 14px 15px !important;
+  border-bottom-color: var(--vx-border) !important;
+}
+
+.rail-title {
+  color: #adb7af !important;
+
+  font-weight: 650 !important;
+
+  letter-spacing: 0.6px !important;
+}
+
+.eyebrow,
+.section-title {
+  font-weight: 650 !important;
+  letter-spacing: 0.6px !important;
+}
+
+/* ============================================================
+   BOTTOM DASHBOARD
+   ============================================================ */
+
+.bottom-dashboard {
+  border-top:
+    1px solid var(--vx-border) !important;
+}
+
+.metric-grid {
+  gap: 0 !important;
+}
+
+.metric-card {
+  background: transparent !important;
+
+  border: 0 !important;
+
+  border-right:
+    1px solid var(--vx-border) !important;
+
+  padding:
+    11px 14px !important;
+}
+
+.metric-card:last-child {
+  border-right: 0 !important;
+}
+
+.metric-value {
+  font-family:
+    "Bahnschrift",
+    "Segoe UI Variable",
+    sans-serif !important;
+
+  font-weight: 520 !important;
+}
+
+/* ============================================================
+   TABLES / ANALYTICS
+   ============================================================ */
+
+.data-table th {
+  font-weight: 600 !important;
+  letter-spacing: 0.4px !important;
+}
+
+.data-table tr,
+.data-table td,
+.data-table th {
+  border-color:
+    var(--vx-border) !important;
+}
+
+.data-table tbody tr:hover {
+  background:
+    rgba(142, 163, 149, 0.045) !important;
+}
+
+/* ============================================================
+   FOCUS
+   ============================================================ */
+
+button:focus-visible {
+  outline:
+    1px solid #bdc9bf;
+
+  outline-offset: -1px;
+}
+
+/* ============================================================
+   PASS 2 — MAP DENSITY + TACTICAL OVERLAYS
+   ============================================================ */
+
+/* Give the map more room */
+.workspace {
+  grid-template-columns: minmax(0, 1fr) 320px !important;
+}
+
+.bottom-dashboard {
+  min-height: 170px !important;
+  max-height: 178px !important;
+}
+
+/* Slightly cooler / darker satellite treatment */
+.map-canvas {
+  filter:
+    saturate(0.78)
+    contrast(1.10)
+    brightness(0.84)
+    hue-rotate(-5deg) !important;
+}
+
+/* Technical grid overlay */
+.map-view::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 7;
+  pointer-events: none;
+
+  background-image:
+    linear-gradient(
+      rgba(190, 207, 194, 0.045) 1px,
+      transparent 1px
+    ),
+    linear-gradient(
+      90deg,
+      rgba(190, 207, 194, 0.045) 1px,
+      transparent 1px
+    ),
+    linear-gradient(
+      rgba(210, 218, 207, 0.022) 1px,
+      transparent 1px
+    ),
+    linear-gradient(
+      90deg,
+      rgba(210, 218, 207, 0.022) 1px,
+      transparent 1px
+    );
+
+  background-size:
+    160px 160px,
+    160px 160px,
+    40px 40px,
+    40px 40px;
+}
+
+/* Vignette to make tactical overlays dominate */
+.map-view::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 8;
+  pointer-events: none;
+
+  background:
+    radial-gradient(
+      circle at 50% 45%,
+      rgba(0,0,0,0) 38%,
+      rgba(4,9,9,0.08) 68%,
+      rgba(3,7,8,0.22) 100%
+    );
+}
+
+/* Ensure actual overlays stay above grid */
+.track-overlay {
+  z-index: 12 !important;
+}
+
+/* Smaller, cleaner map controls */
+.map-toolbar {
+  transform: scale(0.94);
+  transform-origin: top left;
+}
+
+.map-legend {
+  width: 142px !important;
+  padding: 8px 10px !important;
+}
+
+.legend-row {
+  font-size: 8.8px !important;
+  padding: 2px 0 !important;
+}
+
+/* De-emphasize offline warning */
+.connection-banner {
+  padding: 7px 11px !important;
+  font-size: 10px !important;
+  opacity: 0.88;
+}
+
+/* More compact right-side rail */
+.rail-section {
+  padding: 12px 13px !important;
+}
+
+.right-rail {
+  font-size: 0.96em;
+}
+
+/* Bottom metrics become instrument strip */
+.metric-card {
+  padding: 9px 12px !important;
+}
+
+.metric-value {
+  font-size: 20px !important;
+}
+
+.metric-label {
+  font-size: 8px !important;
+  letter-spacing: 0.45px !important;
+}
+
+/* Sensor marker support */
+.sensor-site-symbol {
+  filter:
+    drop-shadow(0 0 2px rgba(180, 156, 255, .4));
+}
+
+/* Aircraft should remain compact */
+.aircraft-glyph {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+/* Selected aircraft halo */
+.track-group:hover {
+  filter:
+    drop-shadow(0 0 4px rgba(235, 241, 224, 0.22));
+}
+
+/* Geofence labels / shapes should not overpower terrain */
+.zone-caption {
+  opacity: 0.86;
+}
+
+/* Darker native map labels/control region */
+.maplibregl-ctrl-attrib,
+.maplibregl-ctrl-scale {
+  backdrop-filter: blur(5px);
+}
+
+
+/* ============================================================
+   PASS 3 — FINAL LIVE TRACKING POLISH
+   ============================================================ */
+
+/* Reclaim vertical space for the operational map */
+.workspace {
+  grid-template-rows: minmax(0, 1fr) 165px !important;
+}
+
+.bottom-dashboard {
+  min-height: 165px !important;
+  max-height: 165px !important;
+}
+
+/* Geofence annotations should support, not dominate, the tracks */
+.zone-svg-label {
+  opacity: 0.82;
+}
+
+/* Ten-aircraft scenes need lighter target annotations */
+.track-group text {
+  text-rendering: geometricPrecision;
+}
+
+.aircraft-glyph {
+  filter:
+    drop-shadow(0 0 2px rgba(220, 240, 225, 0.20));
+}
+
