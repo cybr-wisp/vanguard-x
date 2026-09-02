@@ -96,37 +96,47 @@ public class PipelineOrchestrator {
                             "R-21",
                             "R-21 Restricted Airspace",
                             "#d9535f",
-                            -117.05,
+                            -117.055,
                             34.755,
-                            2_200.0,
-                            1_800.0,
-                            500.0,
-                            1_000.0
+                            1_450.0,
+                            1_150.0,
+                            300.0,
+                            650.0
                     ),
                     new ZoneSpec(
                             "R-33",
                             "R-33 Restricted Airspace",
                             "#d58a32",
-                            -117.0957,
-                            34.7770,
-                            1_600.0,
-                            1_100.0,
-                            400.0,
-                            800.0
+                            -117.175,
+                            34.805,
+                            1_350.0,
+                            1_050.0,
+                            300.0,
+                            625.0
                     ),
                     new ZoneSpec(
                             "R-47",
                             "R-47 Restricted Airspace",
                             "#7b4bc4",
-                            -117.0826,
-                            34.7240,
-                            1_800.0,
-                            1_300.0,
-                            450.0,
-                            900.0
+                            -117.090,
+                            34.690,
+                            1_400.0,
+                            1_100.0,
+                            325.0,
+                            650.0
+                    ),
+                    new ZoneSpec(
+                            "R-58",
+                            "R-58 Restricted Airspace",
+                            "#4a8f9f",
+                            -117.245,
+                            34.730,
+                            1_350.0,
+                            1_050.0,
+                            300.0,
+                            625.0
                     )
             );
-
 
     @Value("${vanguard.kafka.bootstrap-servers}")
     private String bootstrapServers;
@@ -1083,73 +1093,76 @@ public class PipelineOrchestrator {
 
         List<ScenarioConfig.TargetSpec> targets =
                 List.of(
-                        // West -> east: direct R-21 penetration.
                         new ScenarioConfig.TargetSpec(
-                                "TGT-01",
-                                0,
-                                4_000,
-                                1_665,
-                                170,
-                                0,
-                                List.of(
-                                        ScenarioConfig.SegmentSpec.straight(90)
-                                )
+                                "TGT-01", 0,
+                                -15_000, 2_000,
+                                205, 8,
+                                List.of(ScenarioConfig.SegmentSpec.straight(90))
                         ),
 
-                        // East -> west: opposing crossing through R-21.
                         new ScenarioConfig.TargetSpec(
-                                "TGT-02",
-                                4_000,
-                                15_500,
-                                2_600,
-                                -180,
-                                10,
-                                List.of(
-                                        ScenarioConfig.SegmentSpec.straight(90)
-                                )
+                                "TGT-02", 0,
+                                14_000, 6_000,
+                                -195, -18,
+                                List.of(ScenarioConfig.SegmentSpec.straight(90))
                         ),
 
-                        // South -> north: vertical penetration.
                         new ScenarioConfig.TargetSpec(
-                                "TGT-03",
-                                8_000,
-                                8_600,
-                                -4_500,
-                                10,
-                                170,
-                                List.of(
-                                        ScenarioConfig.SegmentSpec.straight(90)
-                                )
+                                "TGT-03", 0,
+                                -7_000, -8_500,
+                                55, 190,
+                                List.of(ScenarioConfig.SegmentSpec.straight(90))
                         ),
 
-                        // Boundary skimmer: enters the advisory/warning buffer
-                        // but remains outside the restricted polygon.
                         new ScenarioConfig.TargetSpec(
-                                "TGT-04",
-                                2_000,
-                                2_500,
-                                4_200,
-                                160,
-                                0,
-                                List.of(
-                                        ScenarioConfig.SegmentSpec.straight(88)
-                                )
+                                "TGT-04", 0,
+                                -12_000, 8_000,
+                                175, -70,
+                                List.of(ScenarioConfig.SegmentSpec.straight(90))
                         ),
 
-                        // Fast southwest -> northeast diagonal penetration.
                         new ScenarioConfig.TargetSpec(
-                                "TGT-05",
-                                9_000,
-                                1_500,
-                                -4_500,
-                                190,
-                                125,
-                                List.of(
-                                        ScenarioConfig.SegmentSpec.straight(89)
-                                )
+                                "TGT-05", 0,
+                                11_500, -7_500,
+                                -165, 135,
+                                List.of(ScenarioConfig.SegmentSpec.straight(90))
+                        ),
+
+                        new ScenarioConfig.TargetSpec(
+                                "TGT-06", 0,
+                                -2_500, -9_000,
+                                25, 185,
+                                List.of(ScenarioConfig.SegmentSpec.straight(90))
+                        ),
+
+                        new ScenarioConfig.TargetSpec(
+                                "TGT-07", 0,
+                                13_500, 1_000,
+                                -190, 20,
+                                List.of(ScenarioConfig.SegmentSpec.straight(90))
+                        ),
+
+                        new ScenarioConfig.TargetSpec(
+                                "TGT-08", 0,
+                                -16_000, -5_000,
+                                200, 75,
+                                List.of(ScenarioConfig.SegmentSpec.straight(90))
+                        ),
+
+                        new ScenarioConfig.TargetSpec(
+                                "TGT-09", 0,
+                                6_000, 9_500,
+                                -110, -175,
+                                List.of(ScenarioConfig.SegmentSpec.straight(90))
+                        ),
+
+                        new ScenarioConfig.TargetSpec(
+                                "TGT-10", 0,
+                                -4_000, 10_000,
+                                95, -170,
+                                List.of(ScenarioConfig.SegmentSpec.straight(90))
                         )
                 );
-
         List<ScenarioConfig.SensorSpec> sensorSpecs =
                 List.of(
                         new ScenarioConfig.SensorSpec(
