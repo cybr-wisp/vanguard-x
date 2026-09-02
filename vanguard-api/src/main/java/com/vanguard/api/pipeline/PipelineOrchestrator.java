@@ -78,10 +78,55 @@ public class PipelineOrchestrator {
     private static final long SIM_TICK_MS = 70L;
     private static final long DEMO_DURATION_MS = 90_000L;
 
-    private static final double R21_CENTER_LNG = -117.05;
-    private static final double R21_CENTER_LAT = 34.755;
-    private static final double R21_RADIUS_X_M = 2_200.0;
-    private static final double R21_RADIUS_Y_M = 1_800.0;
+    private record ZoneSpec(
+            String zoneId,
+            String label,
+            String color,
+            double centerLng,
+            double centerLat,
+            double radiusXM,
+            double radiusYM,
+            double warningBufferM,
+            double advisoryBufferM) {
+    }
+
+    private static final List<ZoneSpec> ZONE_SPECS =
+            List.of(
+                    new ZoneSpec(
+                            "R-21",
+                            "R-21 Restricted Airspace",
+                            "#d9535f",
+                            -117.05,
+                            34.755,
+                            2_200.0,
+                            1_800.0,
+                            500.0,
+                            1_000.0
+                    ),
+                    new ZoneSpec(
+                            "R-33",
+                            "R-33 Restricted Airspace",
+                            "#d58a32",
+                            -117.0957,
+                            34.7770,
+                            1_600.0,
+                            1_100.0,
+                            400.0,
+                            800.0
+                    ),
+                    new ZoneSpec(
+                            "R-47",
+                            "R-47 Restricted Airspace",
+                            "#7b4bc4",
+                            -117.0826,
+                            34.7240,
+                            1_800.0,
+                            1_300.0,
+                            450.0,
+                            900.0
+                    )
+            );
+
 
     @Value("${vanguard.kafka.bootstrap-servers}")
     private String bootstrapServers;
@@ -268,10 +313,11 @@ public class PipelineOrchestrator {
             );
 
             log.info(
-                    "Full pipeline running: targets={}, sensors={}, UDP={}, zone=R-21",
+                    "Full pipeline running: targets={}, sensors={}, UDP={}, zones={}",
                     world.getTargetCount(),
                     sensors.size(),
-                    udpPort
+                    udpPort,
+                    geofenceEngine.getZones().size()
             );
 
         } catch (Exception e) {
@@ -513,6 +559,17 @@ public class PipelineOrchestrator {
                         measurements,
                         modelEntry.getValue(),
                         sensorId,
+                        timestampMs
+                );
+            }
+
+            int suppressedDuplicates =
+                    trackManager.suppressDuplicateTracks();
+
+            if (suppressedDuplicates > 0) {
+                log.debug(
+                        "Suppressed {} duplicate track hypotheses at observation {}",
+                        suppressedDuplicates,
                         timestampMs
                 );
             }
@@ -825,18 +882,32 @@ public class PipelineOrchestrator {
         GeometryFactory geometryFactory =
                 new GeometryFactory();
 
+        for (ZoneSpec spec : ZONE_SPECS) {
+            geofenceEngine.addZone(
+                    new RestrictedZone(
+                            spec.zoneId(),
+                            ellipsePolygon(
+                                    geometryFactory,
+                                    spec
+                            ),
+                            spec.warningBufferM(),
+                            spec.advisoryBufferM()
+                    )
+            );
+        }
+    }
+
+    private Polygon ellipsePolygon(
+            GeometryFactory geometryFactory,
+            ZoneSpec spec) {
+
         double cx =
-                (R21_CENTER_LNG - CENTER_LNG) *
+                (spec.centerLng() - CENTER_LNG) *
                         METERS_PER_DEG_LNG;
 
         double cy =
-                (R21_CENTER_LAT - CENTER_LAT) *
+                (spec.centerLat() - CENTER_LAT) *
                         METERS_PER_DEG_LAT;
-
-        // Compact enough for clear approach/entry/exit transitions in a
-        // short live demo, while still large enough for spatial buffering.
-        double rx = R21_RADIUS_X_M;
-        double ry = R21_RADIUS_Y_M;
 
         Coordinate[] coordinates =
                 new Coordinate[65];
@@ -851,32 +922,164 @@ public class PipelineOrchestrator {
                     new Coordinate(
                             cx +
                                     Math.cos(angle) *
-                                            rx,
+                                            spec.radiusXM(),
                             cy +
                                     Math.sin(angle) *
-                                            ry
+                                            spec.radiusYM()
                     );
         }
 
         coordinates[64] =
                 coordinates[0];
 
-        Polygon polygon =
-                geometryFactory.createPolygon(
-                        coordinates
+        return geometryFactory.createPolygon(
+                coordinates
+        );
+    }
+
+    /**
+     * Browser-facing geofence configuration.
+     *
+     * The UI receives the exact core, warning, and advisory geometries used by
+     * the spatial engine instead of maintaining decorative frontend polygons.
+     */
+    public List<Map<String, Object>> getZoneDefinitions() {
+        if (geofenceEngine == null) {
+            return List.of();
+        }
+
+        List<Map<String, Object>> definitions =
+                new ArrayList<>();
+
+        for (RestrictedZone zone : geofenceEngine.getZones()) {
+            ZoneSpec spec =
+                    findZoneSpec(
+                            zone.getZoneId()
+                    );
+
+            if (spec == null) {
+                continue;
+            }
+
+            Map<String, Object> definition =
+                    new LinkedHashMap<>();
+
+            definition.put(
+                    "zoneId",
+                    spec.zoneId()
+            );
+
+            definition.put(
+                    "label",
+                    spec.label()
+            );
+
+            definition.put(
+                    "color",
+                    spec.color()
+            );
+
+            definition.put(
+                    "center",
+                    List.of(
+                            spec.centerLng(),
+                            spec.centerLat()
+                    )
+            );
+
+            definition.put(
+                    "warningBufferM",
+                    spec.warningBufferM()
+            );
+
+            definition.put(
+                    "advisoryBufferM",
+                    spec.advisoryBufferM()
+            );
+
+            definition.put(
+                    "core",
+                    toWgs84Ring(
+                            zone.getPolygon()
+                    )
+            );
+
+            definition.put(
+                    "warning",
+                    toWgs84Ring(
+                            zone.getWarningBuffer()
+                    )
+            );
+
+            definition.put(
+                    "advisory",
+                    toWgs84Ring(
+                            zone.getAdvisoryBuffer()
+                    )
+            );
+
+            definitions.add(
+                    definition
+            );
+        }
+
+        return List.copyOf(
+                definitions
+        );
+    }
+
+    private ZoneSpec findZoneSpec(
+            String zoneId) {
+
+        for (ZoneSpec spec : ZONE_SPECS) {
+            if (spec.zoneId().equals(zoneId)) {
+                return spec;
+            }
+        }
+
+        return null;
+    }
+
+    private List<List<Double>> toWgs84Ring(
+            org.locationtech.jts.geom.Geometry geometry) {
+
+        Coordinate[] coordinates;
+
+        if (geometry instanceof Polygon polygon) {
+            coordinates =
+                    polygon
+                            .getExteriorRing()
+                            .getCoordinates();
+        } else {
+            coordinates =
+                    geometry.getCoordinates();
+        }
+
+        List<List<Double>> ring =
+                new ArrayList<>(
+                        coordinates.length
                 );
 
-        geofenceEngine.addZone(
-                new RestrictedZone(
-                        "R-21",
-                        polygon,
-                        500,
-                        1_000
-                )
+        for (Coordinate coordinate : coordinates) {
+            ring.add(
+                    List.of(
+                            CENTER_LNG +
+                                    coordinate.x /
+                                            METERS_PER_DEG_LNG,
+                            CENTER_LAT +
+                                    coordinate.y /
+                                            METERS_PER_DEG_LAT
+                    )
+            );
+        }
+
+        return List.copyOf(
+                ring
         );
     }
 
     private ScenarioConfig buildDemoScenario() {
+
 
         List<ScenarioConfig.TargetSpec> targets =
                 List.of(
