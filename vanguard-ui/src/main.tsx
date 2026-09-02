@@ -1,467 +1,1392 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import ReactDOM from 'react-dom/client'
 import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
+import './styles.css'
+import {
+  Activity,
+  AlertTriangle,
+  BarChart3,
+  Crosshair,
+  Database,
+  Filter,
+  Layers,
+  List,
+  Map as MapIcon,
+  Maximize2,
+  Plane,
+  Radio,
+  Server,
+  Settings,
+  ShieldCheck,
+  Target,
+  Wifi,
+  X,
+} from 'lucide-react'
 import { useTrackStream } from './hooks/useTrackStream'
 import { useMetricsStream } from './hooks/useMetricsStream'
-import type { FusedTrack, TrackEvent } from './lib/types'
+import { useZoneConfig } from './hooks/useZoneConfig'
+import type { FusedTrack, SystemMetrics, TrackEvent, ZoneDefinition } from './lib/types'
 
-const CENTER: [number, number] = [-117.15, 34.74]
-const ZOOM = 11.5
+const MAP_CENTER: [number, number] = [-117.13, 34.745]
+const MAP_ZOOM = 10.8
+const METERS_PER_DEG_LNG = 92_000
+const METERS_PER_DEG_LAT = 111_000
+const TRACK_STALE_MS = 10_000
+
+const CARTO_KEY = (import.meta.env.VITE_CARTO_API_KEY as string | undefined)?.trim() || ''
 
 const SENSORS = [
-  { id: 'SSA-01', name: 'Radar-01', lng: -117.35, lat: 34.79, type: 'Radar Site' },
-  { id: 'SSB-02', name: 'Radar-02', lng: -117.38, lat: 34.71, type: 'Radar Site' },
-  { id: 'SSC-03', name: 'ADS-B-01', lng: -117.05, lat: 34.68, type: 'ADS-B Site' },
-]
+  { id: 'SSA-01', lng: -117.35, lat: 34.79, type: 'Range / bearing sensor' },
+  { id: 'SSB-02', lng: -117.38, lat: 34.71, type: 'Range / bearing sensor' },
+  { id: 'SSC-03', lng: -117.05, lat: 34.68, type: 'Range / bearing sensor' },
+] as const
 
-// Three geofence zones
-const ZONES = [
-  { id: 'ALPHA', label: 'GEOFENCE ALPHA', alt: 'ALT: 0 - 12,000 ft', center: [-117.28, 34.80] as [number,number], rx: 0.07, ry: 0.05, color: '#3b82f6' },
-  { id: 'BRAVO', label: 'GEOFENCE BRAVO', alt: 'ALT: 0 - 8,000 ft', center: [-117.18, 34.70] as [number,number], rx: 0.06, ry: 0.06, color: '#22c55e' },
-  { id: 'CHARLIE', label: 'GEOFENCE CHARLIE', alt: 'ALT: 0 - 10,000 ft', center: [-117.02, 34.76] as [number,number], rx: 0.08, ry: 0.05, color: '#ef4444' },
-]
-
-function makeZonePolygon(cx: number, cy: number, rx: number, ry: number): [number, number][] {
-  const pts: [number, number][] = []
-  for (let i = 0; i <= 64; i++) {
-    const a = (i / 64) * Math.PI * 2
-    pts.push([cx + Math.cos(a) * rx, cy + Math.sin(a) * ry])
-  }
-  return pts
+const TRACK_COLORS: Record<FusedTrack['state'], string> = {
+  TENTATIVE: '#7d8a99',
+  CONFIRMED: '#39b86a',
+  COASTING: '#e2a23a',
+  DROPPED: '#d9535f',
 }
 
-const SC: Record<string, string> = { TENTATIVE: '#9ca3af', CONFIRMED: '#22c55e', COASTING: '#f59e0b', DROPPED: '#ef4444' }
-type Tab = 'MAP' | 'EVENTS' | 'SENSORS' | 'METRICS' | 'SYSTEM' | 'BENCHMARKS'
+const BENCHMARK = {
+  date: '2026-09-01',
+  jvm: '25.0.4.1',
+  cores: 8,
+  positionRmse: 10.13,
+  velocityRmse: 4.33,
+  association: 100,
+  fragmentation: 2,
+  falseTracks: 0,
+  rawRmse: 29.24,
+  fusedRmse: 10.08,
+  fusionGain: 65.5,
+  throughput: { 50: 24_413, 200: 20_652, 500: 20_671, 1000: 15_543 },
+  fullLatency: { p50: 10.65, p95: 35.14, p99: 70.80, max: 268.88 },
+  virtualLatency: { p50: 4.47, p95: 9.56, p99: 17.17 },
+  fixedLatency: { p50: 5.09, p95: 15.39, p99: 32.49 },
+  covariance: { init: 44.72, update1: 27.60, update6: 20.26, coast10: 349.04, reacquired: 50.04 },
+} as const
+
+type Tab = 'OVERVIEW' | 'TRACKS' | 'EVENTS' | 'SENSORS' | 'ANALYTICS' | 'SYSTEM' | 'BENCHMARKS'
+type ServiceState = 'ONLINE' | 'DEGRADED' | 'IDLE' | 'OFFLINE'
+type ServiceInfo = { name: string; state: ServiceState; detail: string }
+type TrailPoint = { lng: number; lat: number; ts: number }
+
+const NAV: Array<[Tab, string, React.FC<any>]> = [
+  ['OVERVIEW', 'Overview', MapIcon],
+  ['TRACKS', 'Tracks', Crosshair],
+  ['EVENTS', 'Events', List],
+  ['SENSORS', 'Sensors', Radio],
+  ['ANALYTICS', 'Analytics', BarChart3],
+  ['SYSTEM', 'System Health', Settings],
+  ['BENCHMARKS', 'Benchmarks', Target],
+]
 
 function App() {
   const mapContainer = useRef<HTMLDivElement>(null)
   const mapRef = useRef<maplibregl.Map | null>(null)
-  const [sel, setSel] = useState<string | null>(null)
-  const [tab, setTab] = useState<Tab>('MAP')
-  const [layers, setLayers] = useState({ fused: true, ellipse: true, geo: true, trails: true })
-  const [, forceRender] = useState(0)
+  const trails = useRef<Map<string, TrailPoint[]>>(new Map())
+  const [tab, setTab] = useState<Tab>('OVERVIEW')
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [layers, setLayers] = useState({ tracks: true, ellipse: true, geo: true, trails: true, sensors: true })
+  const [, forceTrailRender] = useState(0)
+  const [now, setNow] = useState(Date.now())
 
-  const { tracks, events, connected: trackWsConnected } = useTrackStream()
-  const { metrics, connected: metricsWsConnected } = useMetricsStream()
-
-  const trails = useRef<Map<string, [number, number][]>>(new Map())
-  useEffect(() => {
-    tracks.forEach((t, id) => {
-      if (t.state === 'DROPPED') { trails.current.delete(id); return }
-      if (Math.abs(t.px) <= 180 && Math.abs(t.py) <= 90) {
-        const trail = trails.current.get(id) || []
-        trail.push([t.px, t.py])
-        if (trail.length > 120) trail.splice(0, trail.length - 120)
-        trails.current.set(id, trail)
-      }
-    })
-    forceRender(r => r + 1)
-  }, [tracks])
-
-  useEffect(() => {
-    if (!mapContainer.current || mapRef.current) return
-    const map = new maplibregl.Map({
-      container: mapContainer.current,
-      style: {
-        version: 8,
-        sources: { carto: { type: 'raster', tiles: ['https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png'], tileSize: 256, attribution: '&copy; CARTO' } },
-        layers: [{ id: 'carto', type: 'raster', source: 'carto' }],
-      },
-      center: CENTER, zoom: ZOOM, attributionControl: false,
-    })
-    map.addControl(new maplibregl.NavigationControl({ showCompass: true }), 'top-right')
-    map.addControl(new maplibregl.ScaleControl({ maxWidth: 120, unit: 'metric' }), 'bottom-right')
-    mapRef.current = map
-    return () => map.remove()
-  }, [])
-
-  // Zone sources
-  useEffect(() => {
-    const map = mapRef.current
-    if (!map || !map.isStyleLoaded()) return
-    ZONES.forEach(z => {
-      if (!map.getSource(`zone-${z.id}`)) {
-        map.addSource(`zone-${z.id}`, { type: 'geojson', data: { type: 'Feature', geometry: { type: 'Polygon', coordinates: [makeZonePolygon(z.center[0], z.center[1], z.rx, z.ry)] }, properties: {} } })
-        map.addLayer({ id: `zone-fill-${z.id}`, type: 'fill', source: `zone-${z.id}`, paint: { 'fill-color': z.color, 'fill-opacity': 0.08 } })
-        map.addLayer({ id: `zone-line-${z.id}`, type: 'line', source: `zone-${z.id}`, paint: { 'line-color': z.color, 'line-width': 2, 'line-dasharray': [4, 3] } })
-      }
-    })
+  const metricsHistory = useRef<{ ingest: number[]; active: number[]; latency: number[]; lag: number[]; loss: number[] }>({
+    ingest: [], active: [], latency: [], lag: [], loss: [],
   })
 
-  const aliveTracks = useMemo(() => {
-    const result: [string, FusedTrack][] = []
-    tracks.forEach((t, id) => {
-      if (t.state !== 'DROPPED' && Math.abs(t.px) <= 180 && Math.abs(t.py) <= 90 && Number.isFinite(t.px) && Number.isFinite(t.py))
-        result.push([id, t])
+  const {
+    tracks,
+    events,
+    trackConnected,
+    eventConnected,
+    lastTrackMessageMs,
+    lastEventMessageMs,
+  } = useTrackStream()
+
+  const { metrics, connected: metricsConnected, lastMessageMs: lastMetricsMessageMs } = useMetricsStream()
+  const { zones, connected: zonesConnected } = useZoneConfig()
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1_000)
+    return () => window.clearInterval(timer)
+  }, [])
+
+  useEffect(() => {
+    tracks.forEach((track, id) => {
+      if (track.state === 'DROPPED') {
+        trails.current.delete(id)
+        return
+      }
+      if (!validLngLat(track.px, track.py)) return
+
+      const trail = trails.current.get(id) || []
+      const last = trail[trail.length - 1]
+      if (!last || last.ts !== track.lastUpdateMs || last.lng !== track.px || last.lat !== track.py) {
+        trail.push({ lng: track.px, lat: track.py, ts: track.lastUpdateMs })
+      }
+
+      const cutoff = track.lastUpdateMs - 60_000
+      while (trail.length && trail[0].ts < cutoff) trail.shift()
+      if (trail.length > 1_500) trail.splice(0, trail.length - 1_500)
+      trails.current.set(id, trail)
     })
-    return result
+    forceTrailRender(value => value + 1)
   }, [tracks])
 
-  const selTrack = sel ? tracks.get(sel) : null
-  const wsStatus = trackWsConnected && metricsWsConnected
-  const uptimeStr = metrics ? formatDuration(metrics.uptimeMs) : '0s'
+  const aliveTracks = useMemo(() => {
+    const result: Array<[string, FusedTrack]> = []
+    tracks.forEach((track, id) => {
+      if (
+        track.state !== 'DROPPED' &&
+        validLngLat(track.px, track.py) &&
+        Number.isFinite(track.lastUpdateMs) &&
+        now - track.lastUpdateMs <= TRACK_STALE_MS
+      ) {
+        result.push([id, track])
+      }
+    })
+
+    return result.sort((a, b) =>
+      stateRank(a[1].state) - stateRank(b[1].state) ||
+      a[0].localeCompare(b[0])
+    )
+  }, [tracks, now])
+
+  useEffect(() => {
+    if (selectedId && !aliveTracks.some(([id]) => id === selectedId)) {
+      setSelectedId(null)
+    }
+  }, [aliveTracks, selectedId])
+
+  const selectedTrack = selectedId ? tracks.get(selectedId) ?? null : null
+  const visibleActive = aliveTracks.length
+  const visibleConfirmed = aliveTracks.filter(([, track]) => track.state === 'CONFIRMED').length
+
+  const gatewayReceived = metrics?.gatewayPacketsReceived ?? 0
+  const gatewayAccepted = metrics?.gatewayPacketsAccepted ?? 0
+  const gatewayDropped = metrics?.packetsDropped ?? 0
+  const gatewayDropRate = gatewayReceived > 0 ? (gatewayDropped / gatewayReceived) * 100 : 0
+
+  useEffect(() => {
+    if (!metrics) return
+    const history = metricsHistory.current
+    history.ingest = appendHistory(history.ingest, metrics.throughputReportsPerSec)
+    history.active = appendHistory(history.active, visibleActive)
+    history.latency = appendHistory(history.latency, metrics.p99LatencyMs)
+    history.lag = appendHistory(history.lag, metrics.kafkaLag)
+    history.loss = appendHistory(history.loss, gatewayDropRate)
+  }, [metrics, gatewayDropRate, visibleActive])
+
+  const healthFresh = metricsConnected && now - lastMetricsMessageMs < 5_000
+  const trackFresh = trackConnected && (lastTrackMessageMs === 0 || now - lastTrackMessageMs < 5_000)
+  const eventFresh = eventConnected && (lastEventMessageMs === 0 || now - lastEventMessageMs < 60_000)
+
+  const services = useMemo<ServiceInfo[]>(() => {
+    const kafkaLag = metrics?.kafkaLag ?? 0
+    const pendingPersistence = metrics?.pendingTrackPersistence ?? 0
+    const skippedPersistence = metrics?.trackPersistenceSkipped ?? 0
+
+    return [
+      {
+        name: 'GATEWAY',
+        state: !healthFresh ? 'OFFLINE' : gatewayAccepted > 0 ? 'ONLINE' : 'IDLE',
+        detail: healthFresh ? `${fmtCompact(gatewayAccepted)} accepted` : 'health stream down',
+      },
+      {
+        name: 'KAFKA',
+        state: !healthFresh ? 'OFFLINE' : kafkaLag > 250 ? 'DEGRADED' : 'ONLINE',
+        detail: healthFresh ? `${kafkaLag} lag` : 'health stream down',
+      },
+      {
+        name: 'TRACKER',
+        state: trackFresh ? 'ONLINE' : 'OFFLINE',
+        detail: trackFresh ? `${visibleConfirmed} confirmed` : 'track stream down',
+      },
+      {
+        name: 'GEOFENCE',
+        state: !zonesConnected ? 'OFFLINE' : eventFresh ? 'ONLINE' : eventConnected ? 'IDLE' : 'DEGRADED',
+        detail: zonesConnected ? `${zones.length} backend zones` : 'zone config unavailable',
+      },
+      {
+        name: 'REDIS',
+        state: !healthFresh ? 'OFFLINE' : skippedPersistence > 0 || pendingPersistence > 256 ? 'DEGRADED' : 'ONLINE',
+        detail: healthFresh ? `${pendingPersistence} pending writes` : 'health stream down',
+      },
+    ]
+  }, [
+    healthFresh,
+    gatewayAccepted,
+    metrics,
+    trackFresh,
+    visibleConfirmed,
+    zonesConnected,
+    zones.length,
+    eventFresh,
+    eventConnected,
+  ])
+
+  const operational = trackConnected && eventConnected && metricsConnected && zonesConnected
+  const alertCount = events.filter(event => event.type === 'ZONE_ENTRY').length
+  const uptime = metrics ? fmtDuration(metrics.uptimeMs) : '—'
+
+  const centerTrack = (track: FusedTrack) => {
+    setTab('OVERVIEW')
+    window.setTimeout(() => {
+      const map = mapRef.current
+      if (!map) return
+      map.flyTo({
+        center: [track.px, track.py],
+        zoom: Math.max(map.getZoom(), 12.4),
+        duration: 700,
+      })
+    }, 0)
+  }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: '#0a0e1a', color: '#cbd5e1', fontFamily: "'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif", fontSize: 13, overflow: 'hidden' }}>
-      {/* Header */}
-      <header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 20px', background: '#0d1117', borderBottom: '1px solid #1b2332', flexShrink: 0, zIndex: 20 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-          <span style={{ fontSize: 20, fontWeight: 800, color: '#f0f4f8', letterSpacing: 1.5, fontFamily: "'JetBrains Mono',monospace" }}>VANGUARD-X</span>
-          <span style={{ fontSize: 12, color: '#5a6a80' }}>Real-Time Telemetry & Tactical Tracking Platform</span>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-          {[['GATEWAY', wsStatus], ['KAFKA', wsStatus], ['TRACKER', wsStatus], ['GEOFENCE', wsStatus], ['REDIS', wsStatus]].map(([name, ok]) => (
-            <div key={name as string} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
-              <div style={{ width: 6, height: 6, borderRadius: '50%', background: ok ? '#22c55e' : '#ef4444' }} />
-              <span style={{ fontSize: 9, color: ok ? '#22c55e' : '#64748b', fontWeight: 600, letterSpacing: 0.5 }}>{ok ? 'ONLINE' : 'OFFLINE'}</span>
-              <span style={{ fontSize: 8, color: '#475569' }}>{name}</span>
-            </div>
-          ))}
-          <div style={{ marginLeft: 12, textAlign: 'right' }}>
-            <div style={{ fontSize: 9, color: '#475569' }}>Operator</div>
-            <div style={{ fontSize: 11, color: '#e2e8f0', fontWeight: 500 }}>Control Room</div>
+    <div className="app">
+      <header className="topbar">
+        <div className="brand">
+          <div className="brand-mark"><Plane size={20} /></div>
+          <div>
+            <div className="brand-title">VANGUARD-<span>X</span></div>
+            <div className="brand-subtitle">Real-Time Telemetry & Tactical Tracking Platform</div>
           </div>
+        </div>
+
+        <div className="mission-block">
+          <div>
+            <div className="mission-label">MISSION STATUS</div>
+            <div className={`mission-value ${operational ? 'ok' : 'bad'}`}>
+              <span className="status-dot" />
+              {operational ? 'OPERATIONAL' : 'DEGRADED'}
+            </div>
+          </div>
+          <div className="mission-time">{new Date(now).toLocaleTimeString([], { hour12: false })}</div>
+        </div>
+
+        <div className="service-strip">
+          {services.map(service => <ServiceBadge key={service.name} service={service} />)}
+        </div>
+
+        <div className="header-stats">
+          <HeaderStat label="ACTIVE" value={String(visibleActive)} />
+          <HeaderStat label="CONFIRMED" value={String(visibleConfirmed)} />
+          <HeaderStat label="ZONES" value={String(zones.length)} />
+          <HeaderStat label="ALERTS" value={String(alertCount)} alert={alertCount > 0} />
+        </div>
+
+        <div className="operator">
+          <div className="operator-label">Operator</div>
+          <div className="operator-value">Control Room</div>
         </div>
       </header>
 
-      <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
-        {/* Left sidebar */}
-        <nav style={{ width: 160, background: '#0d1117', borderRight: '1px solid #1b2332', display: 'flex', flexDirection: 'column', paddingTop: 12, flexShrink: 0, zIndex: 20 }}>
-          {(['MAP', 'EVENTS', 'SENSORS', 'METRICS', 'SYSTEM', 'BENCHMARKS'] as Tab[]).map(t => (
-            <div key={t} onClick={() => setTab(t)} style={{
-              display: 'flex', alignItems: 'center', gap: 10, padding: '10px 16px', cursor: 'pointer',
-              background: tab === t ? 'rgba(59,130,246,0.12)' : 'transparent',
-              borderLeft: tab === t ? '3px solid #3b82f6' : '3px solid transparent',
-              color: tab === t ? '#60a5fa' : '#64748b', fontWeight: tab === t ? 600 : 400, fontSize: 13,
-            }}>
-              <span style={{ fontSize: 16 }}>{tabIcon(t)}</span>
-              {t}
+      <div className="app-body">
+        <nav className="sidebar">
+          <div className="nav-list">
+            {NAV.map(([id, label, Icon]) => (
+              <button key={id} className={`nav-item ${tab === id ? 'active' : ''}`} onClick={() => setTab(id)}>
+                <Icon size={17} />
+                <span>{label}</span>
+              </button>
+            ))}
+          </div>
+
+          <div className="sidebar-health">
+            <div className="eyebrow">SYSTEM STATUS</div>
+            <div className={`sidebar-health-value ${operational ? 'ok' : 'bad'}`}>
+              <span className="status-dot" />
+              {operational ? 'ALL STREAMS CONNECTED' : 'STREAM DEGRADED'}
             </div>
-          ))}
-          <div style={{ flex: 1 }} />
-          <div style={{ padding: '12px 16px', borderTop: '1px solid #1b2332' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-              <div style={{ width: 6, height: 6, borderRadius: '50%', background: wsStatus ? '#22c55e' : '#ef4444' }} />
-              <span style={{ fontSize: 11, color: wsStatus ? '#22c55e' : '#ef4444', fontWeight: 600 }}>SYSTEM HEALTH</span>
-            </div>
-            <div style={{ fontSize: 10, color: wsStatus ? '#22c55e' : '#ef4444', fontWeight: 700 }}>{wsStatus ? 'ALL SYSTEMS NOMINAL' : 'OFFLINE'}</div>
-            <div style={{ fontSize: 9, color: '#475569', marginTop: 4 }}>UPTIME</div>
-            <div style={{ fontSize: 11, color: '#94a3b8' }}>{uptimeStr}</div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 8 }}>
-              <span style={{ fontSize: 10, color: '#475569' }}>DATA STREAM</span>
-              <span style={{ fontSize: 10, color: wsStatus ? '#22c55e' : '#ef4444', fontWeight: 700 }}>{wsStatus ? 'LIVE' : 'OFF'}</span>
-            </div>
+            <div className="sidebar-health-row"><span>Uptime</span><strong>{uptime}</strong></div>
+            <div className="sidebar-health-row"><span>Gateway</span><strong>{fmtCompact(gatewayAccepted)} accepted</strong></div>
+            <div className="sidebar-health-row"><span>Kafka lag</span><strong>{metrics?.kafkaLag ?? 0}</strong></div>
           </div>
         </nav>
 
-        {/* Main content */}
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-          {tab === 'MAP' && <MapView mapContainer={mapContainer} mapRef={mapRef} aliveTracks={aliveTracks} trails={trails} layers={layers} setLayers={setLayers} sel={sel} setSel={setSel} wsStatus={wsStatus} />}
-          {tab === 'EVENTS' && <EventsTab events={events} />}
-          {tab === 'SENSORS' && <SensorsTab wsStatus={wsStatus} />}
-          {tab === 'METRICS' && <MetricsTab metrics={metrics} />}
-          {tab === 'SYSTEM' && <SystemTab wsStatus={wsStatus} uptimeStr={uptimeStr} />}
-          {tab === 'BENCHMARKS' && <BenchmarksTab />}
-        </div>
+        <section className="workspace">
+          <main className="primary-panel">
+            <MapView
+              visible={tab === 'OVERVIEW'}
+              mapContainer={mapContainer}
+              mapRef={mapRef}
+              aliveTracks={aliveTracks}
+              trails={trails}
+              layers={layers}
+              setLayers={setLayers}
+              selectedId={selectedId}
+              setSelectedId={setSelectedId}
+              connected={operational}
+              zones={zones}
+            />
 
-        {/* Right panel */}
-        <aside style={{ width: 340, background: '#0d1117', borderLeft: '1px solid #1b2332', overflowY: 'auto', flexShrink: 0, zIndex: 20 }}>
-          {selTrack ? <TrackInspector id={sel!} track={selTrack} events={events} onClose={() => setSel(null)} /> : <RightDefaultPanel events={events} />}
-        </aside>
+            {tab === 'TRACKS' && (
+              <TracksTab tracks={aliveTracks} selectedId={selectedId} onSelect={setSelectedId} now={now} />
+            )}
+            {tab === 'EVENTS' && <EventsTab events={events} />}
+            {tab === 'SENSORS' && <SensorsTab tracks={aliveTracks} trackConnected={trackConnected} />}
+            {tab === 'ANALYTICS' && (
+              <AnalyticsTab metrics={metrics} dropRate={gatewayDropRate} histories={metricsHistory.current} />
+            )}
+            {tab === 'SYSTEM' && (
+              <SystemTab
+                services={services}
+                metrics={metrics}
+                uptime={uptime}
+                trackConnected={trackConnected}
+                eventConnected={eventConnected}
+                metricsConnected={metricsConnected}
+                zonesConnected={zonesConnected}
+                zoneCount={zones.length}
+              />
+            )}
+            {tab === 'BENCHMARKS' && <BenchmarksTab />}
+          </main>
+
+          <aside className="right-rail">
+            {selectedTrack && selectedId ? (
+              <TrackInspector
+                id={selectedId}
+                track={selectedTrack}
+                events={events}
+                zones={zones}
+                now={now}
+                onClose={() => setSelectedId(null)}
+                onCenter={() => centerTrack(selectedTrack)}
+              />
+            ) : (
+              <MissionSummary
+                operational={operational}
+                active={visibleActive}
+                confirmed={visibleConfirmed}
+                zones={zones.length}
+                metrics={metrics}
+              />
+            )}
+
+            <RecentEvents events={events} />
+            <SensorStatus tracks={aliveTracks} connected={trackConnected} />
+          </aside>
+
+          <section className="bottom-dashboard">
+            <EventFeed events={events} />
+            <div className="metrics-stack">
+              <div className="metric-grid">
+                <MetricCard label="INGEST RATE" value={fmtCompact(metrics?.throughputReportsPerSec ?? 0)} unit="reports/s" history={metricsHistory.current.ingest} />
+                <MetricCard label="ACTIVE TRACKS" value={String(visibleActive)} unit="fresh WS tracks" history={metricsHistory.current.active} />
+                <MetricCard label="P99 LATENCY" value={(metrics?.p99LatencyMs ?? 0).toFixed(1)} unit="ms live E2E" history={metricsHistory.current.latency} />
+                <MetricCard label="KAFKA LAG" value={String(metrics?.kafkaLag ?? 0)} unit="messages" history={metricsHistory.current.lag} />
+                <MetricCard label="GATEWAY DROP RATE" value={gatewayDropRate.toFixed(2)} unit="%" history={metricsHistory.current.loss} />
+              </div>
+
+              <div className="service-health-row">
+                {services.map(service => (
+                  <div className="health-card" key={service.name}>
+                    <span className={`service-dot ${service.state.toLowerCase()}`} />
+                    <div>
+                      <div className="health-name">{service.name}</div>
+                      <div className={`health-state ${service.state.toLowerCase()}`}>{service.state}</div>
+                    </div>
+                    <span className="health-detail">{service.detail}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </section>
+        </section>
       </div>
-
-      {/* Bottom metrics */}
-      <footer style={{ display: 'flex', background: '#0d1117', borderTop: '1px solid #1b2332', flexShrink: 0, zIndex: 20, overflowX: 'auto', alignItems: 'stretch' }}>
-        <div style={{ display: 'flex', alignItems: 'center', padding: '6px 16px', borderRight: '1px solid #1b2332', gap: 8 }}>
-          <span style={{ fontSize: 10, color: '#475569' }}>DATA STREAM</span>
-          <span style={{ fontSize: 11, color: wsStatus ? '#22c55e' : '#ef4444', fontWeight: 700 }}>{wsStatus ? 'LIVE' : 'OFF'}</span>
-        </div>
-        <BCard icon="\u{1F4E1}" l="INGEST RATE" v={metrics?.throughputReportsPerSec ?? 0} u="reports/s" />
-        <BCard icon="\u{2726}" l="ACTENTS" v={metrics?.activeTracks ?? aliveTracks.length} u="tracks" />
-        <BCard icon="\u{23F1}" l="P99 LATENCY" v={metrics?.p99LatencyMs ?? 0} u="ms" />
-        <BCard icon="\u{1F4CA}" l="KAFKA LAG" v={metrics?.kafkaLag ?? 0} u="messages" />
-        <BCard icon="\u{1F4E1}" l="PACKET LOSS" v={0.3} u="%" />
-        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '6px 16px', borderLeft: '1px solid #1b2332', gap: 24, background: 'rgba(15,23,42,0.5)' }}>
-          <span style={{ fontSize: 10, color: '#475569', fontWeight: 600 }}>BENCHMARK SNAPSHOT</span>
-          <BStat l="TARGETS" v="5" /><BStat l="REPORTS/SEC" v={String(metrics?.throughputReportsPerSec ?? 75)} /><BStat l="ASSOCIATION" v="100%" /><BStat l="P99" v={`${(metrics?.p99LatencyMs ?? 22).toFixed(1)} ms`} />
-        </div>
-      </footer>
     </div>
   )
 }
 
-// --- Map View ---
-function MapView({ mapContainer, mapRef, aliveTracks, trails, layers, setLayers, sel, setSel, wsStatus }: any) {
+function MapView({
+  visible,
+  mapContainer,
+  mapRef,
+  aliveTracks,
+  trails,
+  layers,
+  setLayers,
+  selectedId,
+  setSelectedId,
+  connected,
+  zones,
+}: {
+  visible: boolean
+  mapContainer: React.RefObject<HTMLDivElement>
+  mapRef: React.MutableRefObject<maplibregl.Map | null>
+  aliveTracks: Array<[string, FusedTrack]>
+  trails: React.MutableRefObject<Map<string, TrailPoint[]>>
+  layers: Record<string, boolean>
+  setLayers: React.Dispatch<React.SetStateAction<any>>
+  selectedId: string | null
+  setSelectedId: (id: string) => void
+  connected: boolean
+  zones: ZoneDefinition[]
+}) {
+  const [, forceMapRender] = useState(0)
+
+  useEffect(() => {
+    if (!mapContainer.current || mapRef.current) return
+
+    const sources: Record<string, any> = {}
+    const styleLayers: any[] = [
+      { id: 'background', type: 'background', paint: { 'background-color': '#d7e0e8' } },
+    ]
+
+    if (CARTO_KEY) {
+      sources.carto = {
+        type: 'raster',
+        tiles: [`https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png?key=${encodeURIComponent(CARTO_KEY)}`],
+        tileSize: 256,
+        attribution: '© OpenStreetMap contributors, © CARTO',
+      }
+      styleLayers.push({
+        id: 'carto',
+        type: 'raster',
+        source: 'carto',
+        paint: {
+          'raster-opacity': 1,
+          'raster-saturation': -0.08,
+          'raster-contrast': 0.03,
+          'raster-brightness-min': 0.02,
+          'raster-brightness-max': 0.98,
+        },
+      })
+    }
+
+    const map = new maplibregl.Map({
+      container: mapContainer.current,
+      style: { version: 8, sources, layers: styleLayers } as any,
+      center: MAP_CENTER,
+      zoom: MAP_ZOOM,
+      pitch: 0,
+      bearing: 0,
+      attributionControl: false,
+    })
+
+    map.addControl(new maplibregl.NavigationControl({ showCompass: true }), 'top-right')
+    map.addControl(new maplibregl.ScaleControl({ maxWidth: 100, unit: 'metric' }), 'bottom-right')
+    map.addControl(new maplibregl.AttributionControl({ compact: true }), 'bottom-left')
+
+    const refresh = () => forceMapRender(value => value + 1)
+    map.on('move', refresh)
+    map.on('zoom', refresh)
+    map.on('resize', refresh)
+    map.on('load', refresh)
+
+    mapRef.current = map
+
+    return () => {
+      map.off('move', refresh)
+      map.off('zoom', refresh)
+      map.off('resize', refresh)
+      map.remove()
+      mapRef.current = null
+    }
+  }, [mapContainer, mapRef])
+
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map) return
+
+    if (!map.isStyleLoaded()) {
+      const onLoad = () => syncZoneLayers(map, zones, layers.geo)
+      map.once('load', onLoad)
+      return () => {
+        map.off('load', onLoad)
+      }
+    }
+
+    syncZoneLayers(map, zones, layers.geo)
+  }, [zones, layers.geo, mapRef])
+
+  useEffect(() => {
+    if (!visible) return
+    const timer = window.setTimeout(() => mapRef.current?.resize(), 0)
+    return () => window.clearTimeout(timer)
+  }, [visible, mapRef])
+
   return (
-    <div style={{ flex: 1, position: 'relative' }}>
-      <div ref={mapContainer} style={{ width: '100%', height: '100%' }} />
+    <div className={`map-view ${visible ? 'visible' : 'hidden'}`}>
+      <div ref={mapContainer} className="map-canvas" />
 
-      {/* Map toolbar */}
-      <div style={{ position: 'absolute', top: 12, left: 12, display: 'flex', gap: 4, zIndex: 10 }}>
-        {(['fused', 'ellipse', 'geo', 'trails'] as const).map(key => (
-          <button key={key} onClick={() => setLayers((l: any) => ({ ...l, [key]: !l[key] }))} style={{
-            background: layers[key] ? 'rgba(59,130,246,0.3)' : 'rgba(15,23,42,0.8)', border: '1px solid #1b2332',
-            borderRadius: 6, padding: '6px 12px', color: layers[key] ? '#93c5fd' : '#64748b', fontSize: 10,
-            cursor: 'pointer', fontWeight: 600, backdropFilter: 'blur(8px)',
-          }}>{key === 'fused' ? 'Tracks' : key === 'ellipse' ? 'Covariance' : key === 'geo' ? 'Geofences' : 'Trails'}</button>
-        ))}
+      <div className="map-toolbar">
+        <MapToggle icon={<Crosshair size={16} />} label="Tracks" active={layers.tracks} onClick={() => setLayers((value: any) => ({ ...value, tracks: !value.tracks }))} />
+        <MapToggle icon={<Layers size={16} />} label="Uncertainty" active={layers.ellipse} onClick={() => setLayers((value: any) => ({ ...value, ellipse: !value.ellipse }))} />
+        <MapToggle icon={<Filter size={16} />} label="Zones" active={layers.geo} onClick={() => setLayers((value: any) => ({ ...value, geo: !value.geo }))} />
+        <MapToggle icon={<Maximize2 size={16} />} label="Trails" active={layers.trails} onClick={() => setLayers((value: any) => ({ ...value, trails: !value.trails }))} />
+        <MapToggle icon={<Radio size={16} />} label="Sensors" active={layers.sensors} onClick={() => setLayers((value: any) => ({ ...value, sensors: !value.sensors }))} />
       </div>
 
-      {/* Legend */}
-      <div style={{ position: 'absolute', bottom: 30, left: 12, background: 'rgba(13,17,23,0.92)', border: '1px solid #1b2332', borderRadius: 8, padding: '10px 14px', zIndex: 10, backdropFilter: 'blur(8px)' }}>
-        {[['Radar Site', '#a78bfa', '\u{1F4E1}'], ['ADS-B Site', '#a78bfa', '\u{1F4E1}'], ['Track History (60s)', '#22c55e', '\u2014'], ['Geofence', '#ef4444', '- -']].map(([label, color, icon]) => (
-          <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '2px 0', fontSize: 11, color: '#94a3b8' }}>
-            <span style={{ color, fontSize: 12 }}>{icon}</span> {label}
-          </div>
-        ))}
-      </div>
-
-      {!wsStatus && (
-        <div style={{ position: 'absolute', top: 12, left: '50%', transform: 'translateX(-50%)', background: 'rgba(127,29,29,0.92)', border: '1px solid #ef4444', borderRadius: 8, padding: '8px 20px', zIndex: 15, backdropFilter: 'blur(8px)' }}>
-          <span style={{ color: '#fca5a5', fontSize: 13, fontWeight: 600 }}>Waiting for backend connection...</span>
+      {!connected && (
+        <div className="connection-banner">
+          <AlertTriangle size={15} />
+          Waiting for backend streams on :8081
         </div>
       )}
 
-      {/* SVG overlay */}
-      <svg style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 5 }} viewBox={`0 0 ${mapContainer.current?.clientWidth || 800} ${mapContainer.current?.clientHeight || 600}`}>
-        {mapRef.current && aliveTracks.map(([id, t]: [string, FusedTrack]) => {
+      {!CARTO_KEY && (
+        <div className="map-key-banner">Basemap disabled · add VITE_CARTO_API_KEY</div>
+      )}
+
+      <div className="zone-caption">
+        <div>{zones.length} ACTIVE GEOFENCES</div>
+        <span>BACKEND-SYNCHRONIZED CORE / WARNING / ADVISORY GEOMETRY</span>
+      </div>
+
+      <div className="map-legend">
+        <LegendDot color={TRACK_COLORS.CONFIRMED} label="Confirmed track" />
+        <LegendDot color={TRACK_COLORS.TENTATIVE} label="Tentative track" />
+        <LegendDot color={TRACK_COLORS.COASTING} label="Coasting track" />
+        <LegendDot color="#d9535f" label="Restricted core" />
+        <LegendDot color="#7b4bc4" label="Sensor site" />
+      </div>
+
+      <svg className="track-overlay" viewBox={`0 0 ${mapContainer.current?.clientWidth || 1000} ${mapContainer.current?.clientHeight || 700}`}>
+        {mapRef.current && layers.geo && zones.map(zone => {
+          const point = mapRef.current!.project(zone.center)
+          return (
+            <g key={`label-${zone.zoneId}`} className="zone-svg-label">
+              <rect x={point.x - 56} y={point.y - 13} width={112} height={27} rx={4} fill="rgba(255,255,255,.9)" stroke={zone.color} strokeWidth={1} />
+              <text x={point.x} y={point.y - 1} textAnchor="middle" fill={zone.color} fontSize={10} fontWeight={750}>{zone.zoneId}</text>
+              <text x={point.x} y={point.y + 9} textAnchor="middle" fill="#627080" fontSize={7.5}>RESTRICTED AIRSPACE</text>
+            </g>
+          )
+        })}
+
+        {mapRef.current && layers.tracks && aliveTracks.map(([id, track]) => {
           const map = mapRef.current!
-          const pt = map.project([t.px, t.py])
-          const col = SC[t.state]
-          const isSel = sel === id
-          const hdgDeg = Math.atan2(t.vx, t.vy) * 57.3
-          const hdgRad = (hdgDeg - 90) * Math.PI / 180
-          const spd = Math.sqrt(t.vx ** 2 + t.vy ** 2) * 1.944
-          const arrowLen = 30
-          const ax = pt.x + arrowLen * Math.cos(hdgRad), ay = pt.y + arrowLen * Math.sin(hdgRad)
+          const point = map.project([track.px, track.py])
+          const color = TRACK_COLORS[track.state]
+          const selected = selectedId === id
+          const heading = headingDeg(track.vx, track.vy)
+          const headingRad = (heading - 90) * Math.PI / 180
+          const arrowLength = 28
+          const arrowX = point.x + arrowLength * Math.cos(headingRad)
+          const arrowY = point.y + arrowLength * Math.sin(headingRad)
+          const speedMps = Math.hypot(track.vx, track.vy)
           const trail = trails.current.get(id) || []
 
-          return <g key={id} style={{ pointerEvents: 'all', cursor: 'pointer' }} onClick={() => setSel(id)}>
-            {layers.trails && trail.length > 2 && <polyline points={trail.map((p: [number,number]) => { const pp = map.project(p); return `${pp.x},${pp.y}` }).join(' ')} fill="none" stroke={col} strokeWidth={1.5} opacity={0.4} strokeDasharray="6 4" />}
-            {layers.ellipse && <ellipse cx={pt.x} cy={pt.y} rx={(t.ellipseMajor || t.uncertainty * 0.6) * 0.6} ry={(t.ellipseMinor || t.uncertainty * 0.4) * 0.6} transform={`rotate(${t.ellipseAngle || hdgDeg - 90} ${pt.x} ${pt.y})`} fill="none" stroke="#38bdf8" strokeWidth={1} opacity={0.25} strokeDasharray="5 3" />}
-            {layers.fused && <>
-              <line x1={pt.x} y1={pt.y} x2={ax} y2={ay} stroke={col} strokeWidth={2} opacity={0.8} />
-              <polygon points={`${ax},${ay} ${ax - 8 * Math.cos(hdgRad - 0.4)},${ay - 8 * Math.sin(hdgRad - 0.4)} ${ax - 8 * Math.cos(hdgRad + 0.4)},${ay - 8 * Math.sin(hdgRad + 0.4)}`} fill={col} opacity={0.8} />
-              <circle cx={pt.x} cy={pt.y} r={isSel ? 6 : 4} fill={col} stroke={isSel ? '#fff' : '#0a0e1a'} strokeWidth={isSel ? 2 : 1.5} />
-              <g transform={`translate(${pt.x + 14},${pt.y - 18})`}>
-                <rect x={0} y={-10} width={115} height={28} rx={4} fill={isSel ? 'rgba(20,83,45,0.95)' : 'rgba(13,17,23,0.92)'} stroke={col} strokeWidth={isSel ? 1.5 : 0.5} />
-                <text x={8} y={3} fill={col} fontSize={11} fontWeight={700} fontFamily="'JetBrains Mono',monospace">{id}</text>
-                <text x={8} y={14} fill="#7a8a9e" fontSize={9} fontFamily="sans-serif">FL{String(Math.round(80 + Math.random() * 40)).padStart(3, '0')}  {Math.round(spd)} kt</text>
+          const ellipseMajorM = Math.max(1, (track.ellipseMajor ?? track.uncertainty * 2) / 2)
+          const ellipseMinorM = Math.max(1, (track.ellipseMinor ?? track.uncertainty * 1.2) / 2)
+          const eastPoint = map.project([track.px + ellipseMajorM / METERS_PER_DEG_LNG, track.py])
+          const northPoint = map.project([track.px, track.py + ellipseMinorM / METERS_PER_DEG_LAT])
+          const rx = Math.min(85, Math.max(4, Math.abs(eastPoint.x - point.x)))
+          const ry = Math.min(70, Math.max(3, Math.abs(northPoint.y - point.y)))
+
+          return (
+            <g key={id} className="track-group" onClick={() => setSelectedId(id)}>
+              {layers.trails && trail.length > 1 && (
+                <polyline
+                  points={trail.map(trailPoint => {
+                    const projected = map.project([trailPoint.lng, trailPoint.lat])
+                    return `${projected.x},${projected.y}`
+                  }).join(' ')}
+                  fill="none"
+                  stroke={color}
+                  strokeWidth={1.8}
+                  opacity={0.55}
+                  strokeDasharray="5 4"
+                />
+              )}
+
+              {layers.ellipse && (
+                <ellipse
+                  cx={point.x}
+                  cy={point.y}
+                  rx={rx}
+                  ry={ry}
+                  transform={`rotate(${track.ellipseAngle ?? heading} ${point.x} ${point.y})`}
+                  fill={selected ? 'rgba(22,132,180,.08)' : 'rgba(22,132,180,.025)'}
+                  stroke="#238db8"
+                  strokeWidth={1.2}
+                  opacity={selected ? 0.82 : 0.42}
+                  strokeDasharray="4 3"
+                />
+              )}
+
+              <line x1={point.x} y1={point.y} x2={arrowX} y2={arrowY} stroke={color} strokeWidth={2.2} opacity={0.92} />
+              <polygon
+                points={`${arrowX},${arrowY} ${arrowX - 7 * Math.cos(headingRad - 0.42)},${arrowY - 7 * Math.sin(headingRad - 0.42)} ${arrowX - 7 * Math.cos(headingRad + 0.42)},${arrowY - 7 * Math.sin(headingRad + 0.42)}`}
+                fill={color}
+              />
+              <circle cx={point.x} cy={point.y} r={selected ? 6 : 4} fill={color} stroke={selected ? '#ffffff' : '#132230'} strokeWidth={selected ? 2 : 1.5} />
+
+              <g transform={`translate(${point.x + 12},${point.y - 18})`}>
+                <rect width={140} height={34} rx={5} fill={selected ? 'rgba(17,34,47,.96)' : 'rgba(17,34,47,.91)'} stroke={color} strokeWidth={selected ? 1.4 : 0.8} />
+                <text x={9} y={13} fill="#f4f7fa" fontSize={10.5} fontWeight={750}>{id}</text>
+                <text x={9} y={26} fill="#a7b4c0" fontSize={8.5}>{track.state} · {Math.round(speedMps)} m/s</text>
               </g>
-            </>}
-          </g>
+            </g>
+          )
         })}
 
-        {/* Zone labels */}
-        {layers.geo && mapRef.current && ZONES.map(z => {
-          const zp = mapRef.current!.project(z.center)
-          return <g key={z.id}>
-            <text x={zp.x} y={zp.y - 10} fill={z.color} fontSize={12} textAnchor="middle" fontWeight={600} fontFamily="sans-serif" opacity={0.9}>{z.label}</text>
-            <text x={zp.x} y={zp.y + 6} fill={z.color} fontSize={9} textAnchor="middle" fontFamily="sans-serif" opacity={0.6}>{z.alt}</text>
-          </g>
-        })}
-
-        {/* Sensor markers */}
-        {mapRef.current && SENSORS.map(s => {
-          const sp = mapRef.current!.project([s.lng, s.lat])
-          return <g key={s.id}>
-            <circle cx={sp.x} cy={sp.y} r={10} fill="rgba(13,17,23,0.8)" stroke="#a78bfa" strokeWidth={1.5} />
-            <text x={sp.x} y={sp.y + 4} fill="#a78bfa" fontSize={12} textAnchor="middle" fontFamily="sans-serif">{'\u{1F4E1}'}</text>
-            <text x={sp.x} y={sp.y + 24} fill="#e2e8f0" fontSize={11} textAnchor="middle" fontWeight={600} fontFamily="sans-serif">{s.name}</text>
-          </g>
+        {mapRef.current && layers.sensors && SENSORS.map(sensor => {
+          const point = mapRef.current!.project([sensor.lng, sensor.lat])
+          return (
+            <g key={sensor.id}>
+              <circle cx={point.x} cy={point.y} r={11} fill="rgba(255,255,255,.92)" stroke="#7549bb" strokeWidth={1.8} />
+              <circle cx={point.x} cy={point.y} r={3.5} fill="#7549bb" />
+              <text x={point.x} y={point.y + 25} fill="#293746" fontSize={10} textAnchor="middle" fontWeight={750}>{sensor.id}</text>
+            </g>
+          )
         })}
       </svg>
     </div>
   )
 }
 
-// --- Tab Views ---
+function TracksTab({
+  tracks,
+  selectedId,
+  onSelect,
+  now,
+}: {
+  tracks: Array<[string, FusedTrack]>
+  selectedId: string | null
+  onSelect: (id: string) => void
+  now: number
+}) {
+  return (
+    <TabShell title="Live Tracks" subtitle="Directly rendered from /ws/tracks. No client-side target simulation.">
+      <div className="data-table-wrap">
+        <table className="data-table">
+          <thead><tr><th>Track</th><th>State</th><th>Speed</th><th>Heading</th><th>Uncertainty</th><th>Sensors</th><th>Last update</th></tr></thead>
+          <tbody>
+            {tracks.map(([id, track]) => (
+              <tr key={id} className={selectedId === id ? 'selected-row' : ''} onClick={() => onSelect(id)}>
+                <td className="mono strong">{id}</td>
+                <td><StatePill state={track.state} /></td>
+                <td>{Math.hypot(track.vx, track.vy).toFixed(1)} m/s</td>
+                <td>{Math.round(headingDeg(track.vx, track.vy))}°</td>
+                <td>{track.uncertainty.toFixed(1)} m</td>
+                <td>{track.contributingSensors?.join(', ') || '—'}</td>
+                <td>{fmtAge(now - track.lastUpdateMs)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {tracks.length === 0 && <EmptyState text="No live tracks. Start the full backend pipeline." />}
+      </div>
+    </TabShell>
+  )
+}
+
 function EventsTab({ events }: { events: TrackEvent[] }) {
-  return <div style={{ flex: 1, padding: 24, overflowY: 'auto' }}>
-    <h2 style={{ fontSize: 18, fontWeight: 700, color: '#f0f4f8', marginBottom: 16 }}>Recent Events</h2>
-    {events.length === 0 && <p style={{ color: '#475569' }}>No events recorded yet.</p>}
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-      {events.slice(-30).reverse().map((e, i) => (
-        <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 12px', background: '#111822', borderRadius: 6, border: '1px solid #1b2332' }}>
-          <div style={{ width: 8, height: 8, borderRadius: '50%', background: e.type === 'ZONE_ENTRY' ? '#ef4444' : e.type === 'ZONE_APPROACH' ? '#f59e0b' : '#22c55e', flexShrink: 0 }} />
-          <span style={{ color: '#94a3b8', fontSize: 11, fontFamily: 'monospace', minWidth: 70 }}>{new Date(e.timestampMs).toISOString().slice(11, 19)}Z</span>
-          <span style={{ color: e.type === 'ZONE_ENTRY' ? '#fca5a5' : '#86efac', fontSize: 12, fontWeight: 600, minWidth: 140 }}>{e.type.replace(/_/g, ' ')}</span>
-          <span style={{ color: '#cbd5e1', fontSize: 12 }}>{e.trackId} - {e.zoneId}</span>
-        </div>
-      ))}
-    </div>
-  </div>
+  const ordered = [...events].sort((a, b) => b.timestampMs - a.timestampMs)
+  return (
+    <TabShell title="Geofence Events" subtitle="Real transitions emitted by the backend spatial pipeline across all configured zones.">
+      <div className="data-table-wrap">
+        <table className="data-table">
+          <thead><tr><th>Time</th><th>Type</th><th>Track</th><th>Zone</th><th>Transition</th><th>Coordinates</th></tr></thead>
+          <tbody>
+            {ordered.map(event => (
+              <tr key={event.eventId}>
+                <td className="mono">{fmtTime(event.timestampMs)}</td>
+                <td><EventPill type={event.type} /></td>
+                <td className="mono strong">{event.trackId}</td>
+                <td>{event.zoneId}</td>
+                <td>{event.previousState} → {event.newState}</td>
+                <td className="mono">{event.py.toFixed(4)}, {event.px.toFixed(4)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {events.length === 0 && <EmptyState text="No geofence transitions received in this session." />}
+      </div>
+    </TabShell>
+  )
 }
 
-function SensorsTab({ wsStatus }: { wsStatus: boolean }) {
-  return <div style={{ flex: 1, padding: 24, overflowY: 'auto' }}>
-    <h2 style={{ fontSize: 18, fontWeight: 700, color: '#f0f4f8', marginBottom: 16 }}>Sensor Status</h2>
-    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
-      {SENSORS.map(s => (
-        <div key={s.id} style={{ background: '#111822', border: '1px solid #1b2332', borderRadius: 8, padding: 16 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-            <span style={{ fontSize: 20 }}>{'\u{1F4E1}'}</span>
-            <span style={{ fontSize: 15, fontWeight: 700, color: '#f0f4f8' }}>{s.name}</span>
+function SensorsTab({ tracks, trackConnected }: { tracks: Array<[string, FusedTrack]>; trackConnected: boolean }) {
+  return (
+    <TabShell title="Sensor Network" subtitle="Sensor positions mirror the active backend scenario. Activity is derived from live track contribution metadata.">
+      <div className="sensor-card-grid">
+        {SENSORS.map(sensor => {
+          const contributors = tracks.filter(([, track]) => track.contributingSensors?.includes(sensor.id)).length
+          const active = trackConnected && contributors > 0
+
+          return (
+            <div className="sensor-card" key={sensor.id}>
+              <div className="sensor-card-head">
+                <div className="sensor-icon"><Radio size={18} /></div>
+                <div><strong>{sensor.id}</strong><span>{sensor.type}</span></div>
+                <StatusPill state={trackConnected ? active ? 'ONLINE' : 'IDLE' : 'OFFLINE'} />
+              </div>
+              <InfoRow label="Longitude" value={sensor.lng.toFixed(4)} />
+              <InfoRow label="Latitude" value={sensor.lat.toFixed(4)} />
+              <InfoRow label="Contributing tracks" value={String(contributors)} />
+              <InfoRow label="Source" value="Scenario configuration" />
+            </div>
+          )
+        })}
+      </div>
+    </TabShell>
+  )
+}
+
+function AnalyticsTab({
+  metrics,
+  dropRate,
+  histories,
+}: {
+  metrics: SystemMetrics | null
+  dropRate: number
+  histories: { ingest: number[]; active: number[]; latency: number[]; lag: number[]; loss: number[] }
+}) {
+  return (
+    <TabShell title="Live Analytics" subtitle="Streaming values from /ws/health. Benchmark figures are clearly separated from live telemetry.">
+      <div className="analytics-grid">
+        <BigMetric label="Throughput" value={fmtCompact(metrics?.throughputReportsPerSec ?? 0)} unit="reports/s" />
+        <BigMetric label="P50 latency" value={(metrics?.p50LatencyMs ?? 0).toFixed(1)} unit="ms" />
+        <BigMetric label="P95 latency" value={(metrics?.p95LatencyMs ?? 0).toFixed(1)} unit="ms" />
+        <BigMetric label="P99 latency" value={(metrics?.p99LatencyMs ?? 0).toFixed(1)} unit="ms" />
+        <BigMetric label="Kafka lag" value={String(metrics?.kafkaLag ?? 0)} unit="messages" />
+        <BigMetric label="Gateway drop rate" value={dropRate.toFixed(2)} unit="%" />
+      </div>
+
+      <div className="section-title">LIVE TREND WINDOW</div>
+      <div className="trend-grid">
+        <TrendPanel label="INGEST RATE" values={histories.ingest} unit="reports/s" />
+        <TrendPanel label="P99 LATENCY" values={histories.latency} unit="ms" />
+        <TrendPanel label="KAFKA LAG" values={histories.lag} unit="messages" />
+      </div>
+
+      <div className="benchmark-reference">
+        <ShieldCheck size={18} />
+        <div>
+          <strong>Measured benchmark reference</strong>
+          <span>{BENCHMARK.throughput[200].toLocaleString()} reports/s @ 200 targets · {BENCHMARK.positionRmse.toFixed(2)} m RMSE · {BENCHMARK.association}% association</span>
+        </div>
+      </div>
+    </TabShell>
+  )
+}
+
+function SystemTab({
+  services,
+  metrics,
+  uptime,
+  trackConnected,
+  eventConnected,
+  metricsConnected,
+  zonesConnected,
+  zoneCount,
+}: {
+  services: ServiceInfo[]
+  metrics: SystemMetrics | null
+  uptime: string
+  trackConnected: boolean
+  eventConnected: boolean
+  metricsConnected: boolean
+  zonesConnected: boolean
+  zoneCount: number
+}) {
+  return (
+    <TabShell title="System Health" subtitle="Statuses are derived from real WebSocket connectivity, zone configuration, Kafka lag, and persistence metrics.">
+      <div className="system-grid">
+        {services.map(service => (
+          <div className="system-service-card" key={service.name}>
+            <div className="system-service-icon">
+              {service.name === 'REDIS' ? <Database size={19} /> : service.name === 'KAFKA' ? <Server size={19} /> : <Activity size={19} />}
+            </div>
+            <div className="system-service-main">
+              <strong>{service.name}</strong>
+              <span>{service.detail}</span>
+            </div>
+            <StatusPill state={service.state} />
           </div>
-          <IR l="ID" v={s.id} /><IR l="Type" v={s.type} /><IR l="Status" v={wsStatus ? 'ONLINE' : 'OFFLINE'} />
-          <IR l="Msg/s" v={wsStatus ? String(2000 + Math.round(Math.random() * 500)) : '0'} />
-          <IR l="Position" v={`${s.lat.toFixed(3)}N, ${Math.abs(s.lng).toFixed(3)}W`} />
-        </div>
-      ))}
-    </div>
-  </div>
-}
+        ))}
+      </div>
 
-function MetricsTab({ metrics }: { metrics: any }) {
-  return <div style={{ flex: 1, padding: 24, overflowY: 'auto' }}>
-    <h2 style={{ fontSize: 18, fontWeight: 700, color: '#f0f4f8', marginBottom: 16 }}>Pipeline Metrics</h2>
-    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
-      {[
-        ['Throughput', `${metrics?.throughputReportsPerSec ?? 0} reports/s`, '#3b82f6'],
-        ['P50 Latency', `${(metrics?.p50LatencyMs ?? 0).toFixed(1)} ms`, '#22c55e'],
-        ['P95 Latency', `${(metrics?.p95LatencyMs ?? 0).toFixed(1)} ms`, '#f59e0b'],
-        ['P99 Latency', `${(metrics?.p99LatencyMs ?? 0).toFixed(1)} ms`, '#ef4444'],
-        ['Active Tracks', `${metrics?.activeTracks ?? 0}`, '#a78bfa'],
-        ['Confirmed', `${metrics?.confirmedTracks ?? 0}`, '#22c55e'],
-        ['Coasting', `${metrics?.coastingTracks ?? 0}`, '#f59e0b'],
-        ['Queue Depth', `${metrics?.queueDepth ?? 0}`, '#3b82f6'],
-        ['Kafka Lag', `${metrics?.kafkaLag ?? 0} messages`, '#a78bfa'],
-      ].map(([label, val, color]) => (
-        <div key={label as string} style={{ background: '#111822', border: '1px solid #1b2332', borderRadius: 8, padding: 16 }}>
-          <div style={{ fontSize: 10, color: '#64748b', fontWeight: 600, marginBottom: 4 }}>{label}</div>
-          <div style={{ fontSize: 24, fontWeight: 700, color: color as string }}>{val}</div>
-        </div>
-      ))}
-    </div>
-  </div>
-}
+      <div className="section-title">STREAM TRANSPORT</div>
+      <div className="transport-grid">
+        <TransportRow label="/ws/tracks" connected={trackConnected} />
+        <TransportRow label="/ws/events" connected={eventConnected} />
+        <TransportRow label="/ws/health" connected={metricsConnected} />
+        <TransportRow label="/api/zones" connected={zonesConnected} />
+      </div>
 
-function SystemTab({ wsStatus, uptimeStr }: { wsStatus: boolean; uptimeStr: string }) {
-  return <div style={{ flex: 1, padding: 24, overflowY: 'auto' }}>
-    <h2 style={{ fontSize: 18, fontWeight: 700, color: '#f0f4f8', marginBottom: 16 }}>System Status</h2>
-    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-      {['Ingest Service', 'Tracker Service', 'Event Engine', 'WebSocket Gateway', 'Redis Cache', 'Kafka Broker'].map(s => (
-        <div key={s} style={{ background: '#111822', border: '1px solid #1b2332', borderRadius: 8, padding: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <span style={{ color: '#cbd5e1', fontSize: 13 }}>{s}</span>
-          <span style={{ color: wsStatus ? '#22c55e' : '#ef4444', fontSize: 12, fontWeight: 700 }}>{wsStatus ? 'Healthy' : 'Down'}</span>
-        </div>
-      ))}
-    </div>
-    <div style={{ marginTop: 20, background: '#111822', border: '1px solid #1b2332', borderRadius: 8, padding: 16 }}>
-      <IR l="Uptime" v={uptimeStr} /><IR l="JVM" v="Java 21 (Temurin)" /><IR l="Spring Boot" v="3.3.2" /><IR l="Kafka" v="Confluent 7.6.1" />
-    </div>
-  </div>
+      <div className="section-title">BACKEND HEALTH PAYLOAD</div>
+      <div className="health-payload">
+        <InfoRow label="Uptime" value={uptime} />
+        <InfoRow label="Configured geofences" value={String(zoneCount)} />
+        <InfoRow label="Gateway packets received" value={(metrics?.gatewayPacketsReceived ?? 0).toLocaleString()} />
+        <InfoRow label="Gateway packets accepted" value={(metrics?.gatewayPacketsAccepted ?? 0).toLocaleString()} />
+        <InfoRow label="Track Kafka lag" value={String(metrics?.trackKafkaLag ?? 0)} />
+        <InfoRow label="Event Kafka lag" value={String(metrics?.eventKafkaLag ?? 0)} />
+        <InfoRow label="Pending Redis writes" value={String(metrics?.pendingTrackPersistence ?? 0)} />
+        <InfoRow label="Persistence writes skipped" value={String(metrics?.trackPersistenceSkipped ?? 0)} />
+      </div>
+    </TabShell>
+  )
 }
 
 function BenchmarksTab() {
-  return <div style={{ flex: 1, padding: 24, overflowY: 'auto' }}>
-    <h2 style={{ fontSize: 18, fontWeight: 700, color: '#f0f4f8', marginBottom: 16 }}>Benchmark Results</h2>
-    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 16, marginBottom: 20 }}>
-      {[['RMSE', '10.13 m', '#22c55e'], ['Association', '100%', '#22c55e'], ['False Tracks', '0', '#22c55e'], ['Fusion Gain', '65.5%', '#3b82f6']].map(([l, v, c]) => (
-        <div key={l as string} style={{ background: '#111822', border: '1px solid #1b2332', borderRadius: 8, padding: 16, textAlign: 'center' }}>
-          <div style={{ fontSize: 10, color: '#64748b', marginBottom: 4 }}>{l}</div>
-          <div style={{ fontSize: 24, fontWeight: 700, color: c as string }}>{v}</div>
-        </div>
-      ))}
-    </div>
-    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-      {[['Throughput', '23K rpt/s @ 1000 targets'], ['p99 Latency', '12.05 ms (virtual threads)'], ['Packet Loss', '100% accuracy @ 20% loss'], ['Replay', 'Bit-identical determinism']].map(([l, v]) => (
-        <div key={l as string} style={{ background: '#111822', border: '1px solid #1b2332', borderRadius: 8, padding: 16 }}>
-          <div style={{ fontSize: 10, color: '#64748b', marginBottom: 4 }}>{l}</div>
-          <div style={{ fontSize: 13, color: '#cbd5e1' }}>{v}</div>
-        </div>
-      ))}
-    </div>
-    <button style={{ marginTop: 20, width: '100%', padding: '12px 0', background: 'rgba(59,130,246,0.15)', border: '1px solid #3b82f6', borderRadius: 8, color: '#60a5fa', fontSize: 14, fontWeight: 700, cursor: 'pointer' }}>
-      {'\u25B6'} RUN BENCHMARK
-    </button>
-  </div>
+  return (
+    <TabShell title="Benchmark Results" subtitle={`Measured ${BENCHMARK.date} · JVM ${BENCHMARK.jvm} · ${BENCHMARK.cores} cores · FullBenchmark`}>
+      <div className="benchmark-hero-grid">
+        <BigMetric label="Position RMSE" value={BENCHMARK.positionRmse.toFixed(2)} unit="m" good />
+        <BigMetric label="Association" value={`${BENCHMARK.association}%`} unit="accuracy" good />
+        <BigMetric label="Fusion gain" value={`${BENCHMARK.fusionGain}%`} unit="RMSE reduction" good />
+        <BigMetric label="False tracks" value={String(BENCHMARK.falseTracks)} unit="benchmark metric" good />
+      </div>
+
+      <div className="benchmark-columns">
+        <BenchmarkPanel title="Tracking accuracy">
+          <InfoRow label="Position RMSE" value={`${BENCHMARK.positionRmse.toFixed(2)} m`} />
+          <InfoRow label="Velocity RMSE" value={`${BENCHMARK.velocityRmse.toFixed(2)} m/s`} />
+          <InfoRow label="Association accuracy" value={`${BENCHMARK.association.toFixed(1)}%`} />
+          <InfoRow label="Fragmentation" value={String(BENCHMARK.fragmentation)} />
+        </BenchmarkPanel>
+
+        <BenchmarkPanel title="Fusion vs raw">
+          <InfoRow label="Raw RMSE" value={`${BENCHMARK.rawRmse.toFixed(2)} m`} />
+          <InfoRow label="Fused RMSE" value={`${BENCHMARK.fusedRmse.toFixed(2)} m`} />
+          <InfoRow label="Improvement" value={`${BENCHMARK.fusionGain}%`} />
+          <InfoRow label="Event deduplication" value="1000 → 1" />
+          <InfoRow label="Replay determinism" value="IDENTICAL · Δ 0.00e+00 m" />
+        </BenchmarkPanel>
+
+        <BenchmarkPanel title="Throughput · after spatial index">
+          {Object.entries(BENCHMARK.throughput).map(([targets, rate]) => (
+            <InfoRow key={targets} label={`${targets} targets`} value={`${rate.toLocaleString()} reports/s`} />
+          ))}
+        </BenchmarkPanel>
+
+        <BenchmarkPanel title="Latency">
+          <InfoRow label="Full pipeline p50" value={`${BENCHMARK.fullLatency.p50.toFixed(2)} ms`} />
+          <InfoRow label="Full pipeline p95" value={`${BENCHMARK.fullLatency.p95.toFixed(2)} ms`} />
+          <InfoRow label="Full pipeline p99" value={`${BENCHMARK.fullLatency.p99.toFixed(2)} ms`} />
+          <InfoRow label="Virtual executor p99" value={`${BENCHMARK.virtualLatency.p99.toFixed(2)} ms`} />
+          <InfoRow label="Fixed executor p99" value={`${BENCHMARK.fixedLatency.p99.toFixed(2)} ms`} />
+        </BenchmarkPanel>
+
+        <BenchmarkPanel title="Covariance honesty">
+          <InfoRow label="After init" value={`${BENCHMARK.covariance.init.toFixed(2)} m`} />
+          <InfoRow label="After first update" value={`${BENCHMARK.covariance.update1.toFixed(2)} m`} />
+          <InfoRow label="After six updates" value={`${BENCHMARK.covariance.update6.toFixed(2)} m`} />
+          <InfoRow label="After ten coast cycles" value={`${BENCHMARK.covariance.coast10.toFixed(2)} m`} />
+          <InfoRow label="After reacquisition" value={`${BENCHMARK.covariance.reacquired.toFixed(2)} m`} />
+        </BenchmarkPanel>
+
+        <BenchmarkPanel title="Loss robustness">
+          <InfoRow label="0% loss" value="100% association" />
+          <InfoRow label="5% loss" value="100% association" />
+          <InfoRow label="10% loss" value="100% association" />
+          <InfoRow label="20% loss" value="100% association" />
+          <InfoRow label="Re-entry correctness" value="new ZONE_ENTRY emitted" />
+        </BenchmarkPanel>
+      </div>
+
+      <div className="cli-note">
+        <span>REPRODUCE</span>
+        <code>mvn -pl benchmarks exec:java "-Dexec.mainClass=com.vanguard.benchmark.FullBenchmark"</code>
+      </div>
+    </TabShell>
+  )
 }
 
-// --- Subcomponents ---
-function TrackInspector({ id, track: t, events, onClose }: { id: string; track: FusedTrack; events: TrackEvent[]; onClose: () => void }) {
-  const hdg = Math.atan2(t.vx, t.vy) * 57.3
-  const hdgNorm = hdg < 0 ? hdg + 360 : hdg
-  const spd = Math.sqrt(t.vx ** 2 + t.vy ** 2) * 1.944
-  const sensorCount = t.contributingSensors?.length ?? 0
-  const inZone = events.some(e => e.trackId === id && e.type === 'ZONE_ENTRY')
+function TrackInspector({
+  id,
+  track,
+  events,
+  zones,
+  now,
+  onClose,
+  onCenter,
+}: {
+  id: string
+  track: FusedTrack
+  events: TrackEvent[]
+  zones: ZoneDefinition[]
+  now: number
+  onClose: () => void
+  onCenter: () => void
+}) {
+  const speedMps = Math.hypot(track.vx, track.vy)
+  const speedKnots = speedMps * 1.943844
+  const heading = headingDeg(track.vx, track.vy)
+  const trackEvents = events.filter(event => event.trackId === id).sort((a, b) => b.timestampMs - a.timestampMs)
 
-  return <>
-    <div style={{ padding: '14px 16px', borderBottom: '1px solid #1b2332' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-        <span style={{ fontSize: 14, fontWeight: 700, color: '#f0f4f8' }}>TRACK INSPECTOR</span>
-        <span style={{ cursor: 'pointer', color: '#64748b', fontSize: 14 }} onClick={onClose}>&#10005;</span>
+  const zoneStates = zones.map(zone => {
+    const latest = trackEvents.find(event => event.zoneId === zone.zoneId)
+    const state = !latest || latest.type === 'ZONE_EXIT' ? 'CLEAR' : latest.newState
+    return { zone, state }
+  })
+
+  return (
+    <section className="rail-section inspector">
+      <div className="rail-title-row">
+        <div className="rail-title">TRACK INSPECTOR</div>
+        <button className="icon-button" onClick={onClose} aria-label="Close inspector"><X size={15} /></button>
       </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
-        <div style={{ width: 8, height: 8, borderRadius: '50%', background: SC[t.state] }} />
-        <span style={{ fontSize: 16, fontWeight: 700, color: '#f0f4f8', fontFamily: "'JetBrains Mono',monospace" }}>{id}</span>
-        <span style={{ padding: '2px 10px', borderRadius: 4, background: inZone ? '#7f1d1d' : t.state === 'CONFIRMED' ? '#14532d' : '#78350f', color: inZone ? '#fca5a5' : SC[t.state], fontSize: 10, fontWeight: 600, marginLeft: 'auto' }}>{inZone ? 'BREACH' : t.state}</span>
+
+      <div className="track-title-row">
+        <Plane size={18} color={TRACK_COLORS[track.state]} />
+        <span className="track-title mono">{id}</span>
+        <StatePill state={track.state} />
       </div>
-      <IR l="Velocity" v={`${Math.round(spd)} kt`} /><IR l="Heading" v={`${Math.round(hdgNorm)}\u00B0`} />
-      <IR l="Altitude" v={`${(8000 + Math.round(Math.random() * 4000)).toLocaleString()} ft`} />
-      <IR l="Last Update" v={new Date(t.lastUpdateMs).toISOString().slice(11, 23) + 'Z'} />
-      <IR l="Sensor Sources" v={t.contributingSensors?.join(', ') || 'None'} />
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 }}>
-        <span style={{ fontSize: 11, color: '#64748b' }}>Confidence</span>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ color: '#e2e8f0', fontWeight: 700 }}>{Math.round(Math.max(10, 100 - t.uncertainty))}%</span>
-          <div style={{ width: 60, height: 4, borderRadius: 2, background: '#1b2332', overflow: 'hidden' }}>
-            <div style={{ width: `${Math.max(10, 100 - t.uncertainty)}%`, height: '100%', borderRadius: 2, background: '#22c55e' }} />
+
+      <div className="inspector-grid">
+        <InfoRow label="Ground speed" value={`${speedMps.toFixed(1)} m/s · ${Math.round(speedKnots)} kt`} />
+        <InfoRow label="Heading" value={`${Math.round(heading)}°`} />
+        <InfoRow label="Coordinates" value={`${track.py.toFixed(5)}, ${track.px.toFixed(5)}`} />
+        <InfoRow label="Position uncertainty" value={`${track.uncertainty.toFixed(1)} m`} />
+        <InfoRow label="Ellipse major" value={track.ellipseMajor != null ? `${track.ellipseMajor.toFixed(1)} m` : '—'} />
+        <InfoRow label="Ellipse minor" value={track.ellipseMinor != null ? `${track.ellipseMinor.toFixed(1)} m` : '—'} />
+        <InfoRow label="Last update" value={`${fmtTime(track.lastUpdateMs)} · ${fmtAge(now - track.lastUpdateMs)}`} />
+        <InfoRow label="Sensor sources" value={track.contributingSensors?.join(', ') || '—'} />
+      </div>
+
+      <div className="subsection-title">GEOFENCE STATUS</div>
+      <div className="zone-state-grid">
+        {zoneStates.map(({ zone, state }) => (
+          <div className="zone-state-row" key={zone.zoneId}>
+            <span className="zone-color-dot" style={{ background: zone.color }} />
+            <span>{zone.zoneId}</span>
+            <strong className={state === 'CLEAR' ? 'ok-text' : 'alert-text'}>{state}</strong>
           </div>
+        ))}
+      </div>
+
+      <button className="primary-action" onClick={onCenter}><Crosshair size={15} /> CENTER ON TRACK</button>
+
+      <div className="subsection-title">TRACK EVENTS</div>
+      <div className="mini-event-list">
+        {trackEvents.slice(0, 6).map(event => <MiniEvent key={event.eventId} event={event} />)}
+        {trackEvents.length === 0 && <div className="muted-copy">No zone transitions for this track.</div>}
+      </div>
+    </section>
+  )
+}
+
+function MissionSummary({
+  operational,
+  active,
+  confirmed,
+  zones,
+  metrics,
+}: {
+  operational: boolean
+  active: number
+  confirmed: number
+  zones: number
+  metrics: SystemMetrics | null
+}) {
+  return (
+    <section className="rail-section">
+      <div className="rail-title">MISSION OVERVIEW</div>
+      <div className={`mission-summary ${operational ? 'ok' : 'bad'}`}>
+        <ShieldCheck size={23} />
+        <div>
+          <strong>{operational ? 'Pipeline operational' : 'Pipeline degraded'}</strong>
+          <span>Live tracks, events, metrics, and zone configuration</span>
         </div>
       </div>
-      {inZone && <div style={{ marginTop: 6 }}><span style={{ fontSize: 11, color: '#64748b' }}>Geofence Status</span><span style={{ float: 'right', color: '#ef4444', fontWeight: 700, fontSize: 12 }}>BREACH - CHARLIE</span></div>}
-    </div>
-    <div style={{ padding: '14px 16px', borderBottom: '1px solid #1b2332' }}>
-      <div style={{ fontSize: 12, fontWeight: 700, color: '#94a3b8', marginBottom: 8 }}>RECENT EVENTS</div>
-      {events.filter(e => e.trackId === id).slice(-6).map((e, i) => (
-        <div key={i} style={{ display: 'flex', gap: 8, padding: '4px 0', fontSize: 11 }}>
-          <div style={{ width: 6, height: 6, borderRadius: '50%', background: e.type === 'ZONE_ENTRY' ? '#ef4444' : e.type === 'ZONE_APPROACH' ? '#f59e0b' : '#22c55e', marginTop: 5, flexShrink: 0 }} />
-          <div>
-            <span style={{ color: '#64748b', marginRight: 6 }}>{new Date(e.timestampMs).toISOString().slice(11, 19)}Z</span>
-            <span style={{ color: e.type === 'ZONE_ENTRY' ? '#fca5a5' : '#86efac', fontWeight: 600 }}>{e.type.replace(/_/g, ' ')}</span>
-            <div style={{ color: '#94a3b8', fontSize: 10 }}>{e.trackId} - {e.zoneId}</div>
-          </div>
-        </div>
-      ))}
-      {events.filter(e => e.trackId === id).length === 0 && <span style={{ color: '#475569', fontSize: 11 }}>No events for this track</span>}
-    </div>
-    <div style={{ padding: '14px 16px' }}>
-      <div style={{ fontSize: 12, fontWeight: 700, color: '#94a3b8', marginBottom: 8 }}>SENSOR STATUS</div>
-      {SENSORS.map(s => (
-        <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '4px 0', fontSize: 11 }}>
-          <span style={{ color: '#cbd5e1' }}>{s.name}</span>
-          <span style={{ color: '#22c55e', fontWeight: 600 }}>ONLINE</span>
-        </div>
-      ))}
-    </div>
-  </>
+
+      <div className="summary-grid">
+        <SummaryStat label="ACTIVE" value={String(active)} />
+        <SummaryStat label="CONFIRMED" value={String(confirmed)} />
+        <SummaryStat label="ZONES" value={String(zones)} />
+        <SummaryStat label="P99" value={`${(metrics?.p99LatencyMs ?? 0).toFixed(0)} ms`} />
+      </div>
+    </section>
+  )
 }
 
-function RightDefaultPanel({ events }: { events: TrackEvent[] }) {
-  return <div style={{ padding: 16 }}>
-    <div style={{ fontSize: 14, fontWeight: 700, color: '#94a3b8', marginBottom: 8 }}>TRACK INSPECTOR</div>
-    <p style={{ color: '#475569', fontSize: 12, lineHeight: 1.6 }}>Click any track on the map to inspect its state, velocity, uncertainty, and contributing sensors.</p>
-    <div style={{ marginTop: 20 }}>
-      <div style={{ fontSize: 12, fontWeight: 700, color: '#94a3b8', marginBottom: 8 }}>ZONE EVENTS</div>
-      {events.slice(-10).map((e, i) => <div key={i} style={{ display: 'flex', gap: 8, padding: '3px 0', fontSize: 11 }}><div style={{ width: 6, height: 6, borderRadius: '50%', background: e.type === 'ZONE_ENTRY' ? '#ef4444' : e.type === 'ZONE_APPROACH' ? '#f59e0b' : '#22c55e', marginTop: 5, flexShrink: 0 }} /><div><span style={{ color: e.type === 'ZONE_ENTRY' ? '#fca5a5' : '#86efac', fontWeight: 600 }}>{e.trackId}: </span><span style={{ color: '#94a3b8' }}>{e.type.replace(/_/g, ' ')} - {e.zoneId}</span></div></div>)}
-      {events.length === 0 && <span style={{ color: '#475569', fontSize: 11 }}>No events yet</span>}
-    </div>
-  </div>
+function RecentEvents({ events }: { events: TrackEvent[] }) {
+  const recent = [...events].sort((a, b) => b.timestampMs - a.timestampMs).slice(0, 8)
+  return (
+    <section className="rail-section">
+      <div className="rail-title-row">
+        <div className="rail-title">RECENT EVENTS</div>
+        <span className="rail-count">{events.length} session</span>
+      </div>
+
+      <div className="mini-event-list">
+        {recent.map(event => <MiniEvent key={event.eventId} event={event} />)}
+        {recent.length === 0 && <div className="muted-copy">Waiting for geofence transitions.</div>}
+      </div>
+    </section>
+  )
 }
 
-// --- Helpers ---
-function IR({ l, v }: { l: string; v: string }) { return <div style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0', fontSize: 12 }}><span style={{ color: '#64748b' }}>{l}</span><span style={{ color: '#e2e8f0', fontFamily: "'JetBrains Mono',monospace", fontSize: 11 }}>{v}</span></div> }
-function BCard({ icon, l, v, u }: { icon: string; l: string; v: number; u: string }) {
-  return <div style={{ display: 'flex', flexDirection: 'column', minWidth: 120, padding: '8px 16px', borderRight: '1px solid #1b2332' }}>
-    <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}><span style={{ fontSize: 12 }}>{icon}</span><span style={{ fontSize: 9, fontWeight: 600, color: '#475569' }}>{l}</span></div>
-    <div style={{ fontSize: 22, fontWeight: 700, color: '#f0f4f8', marginTop: 2 }}>{typeof v === 'number' ? v.toLocaleString(undefined, { maximumFractionDigits: 1 }) : v}</div>
-    <span style={{ fontSize: 9, color: '#475569' }}>{u}</span>
-  </div>
+function SensorStatus({ tracks, connected }: { tracks: Array<[string, FusedTrack]>; connected: boolean }) {
+  return (
+    <section className="rail-section rail-fill">
+      <div className="rail-title">SENSOR STATUS</div>
+      <table className="sensor-mini-table">
+        <thead><tr><th>SENSOR</th><th>TRACKS</th><th>STATUS</th></tr></thead>
+        <tbody>
+          {SENSORS.map(sensor => {
+            const count = tracks.filter(([, track]) => track.contributingSensors?.includes(sensor.id)).length
+            return (
+              <tr key={sensor.id}>
+                <td className="mono">{sensor.id}</td>
+                <td>{count}</td>
+                <td>
+                  <span className={`sensor-state ${connected ? count ? 'online' : 'idle' : 'offline'}`}>
+                    {connected ? count ? 'ACTIVE' : 'IDLE' : 'OFFLINE'}
+                  </span>
+                </td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+
+      <div className="benchmark-snapshot">
+        <div className="rail-title-row">
+          <div className="rail-title">BENCHMARK SNAPSHOT</div>
+          <span className="rail-count">{BENCHMARK.date}</span>
+        </div>
+
+        <div className="snapshot-grid">
+          <SummaryStat label="RMSE" value={`${BENCHMARK.positionRmse.toFixed(1)} m`} />
+          <SummaryStat label="ASSOC." value={`${BENCHMARK.association}%`} />
+          <SummaryStat label="200 TARGETS" value={`${(BENCHMARK.throughput[200] / 1000).toFixed(1)}K/s`} />
+          <SummaryStat label="VIRTUAL P99" value={`${BENCHMARK.virtualLatency.p99.toFixed(1)} ms`} />
+        </div>
+
+        <div className="snapshot-note">Measured benchmark · not live telemetry</div>
+      </div>
+    </section>
+  )
 }
-function BStat({ l, v }: { l: string; v: string }) { return <div style={{ textAlign: 'center' }}><div style={{ fontSize: 14, fontWeight: 700, color: '#e2e8f0' }}>{v}</div><div style={{ fontSize: 8, color: '#475569' }}>{l}</div></div> }
-function tabIcon(t: Tab) { return { MAP: '\u{1F5FA}', EVENTS: '\u2630', SENSORS: '\u{1F4E1}', METRICS: '\u{1F4CA}', SYSTEM: '\u2699', BENCHMARKS: '\u{1F3AF}' }[t] }
-function formatDuration(ms: number) { const s = Math.floor(ms / 1000); const m = Math.floor(s / 60); const h = Math.floor(m / 60); const d = Math.floor(h / 24); if (d > 0) return `${d}d ${h % 24}h ${m % 60}m`; if (h > 0) return `${h}h ${m % 60}m ${s % 60}s`; if (m > 0) return `${m}m ${s % 60}s`; return `${s}s` }
+
+function EventFeed({ events }: { events: TrackEvent[] }) {
+  const recent = [...events].sort((a, b) => b.timestampMs - a.timestampMs).slice(0, 7)
+  return (
+    <div className="event-feed">
+      <div className="bottom-title-row">
+        <span>EVENT FEED</span>
+        <span>{events.length} SESSION EVENTS</span>
+      </div>
+
+      <div className="event-feed-header">
+        <span>TIME</span><span>TYPE</span><span>TRACK</span><span>ZONE / TRANSITION</span>
+      </div>
+
+      {recent.map(event => (
+        <div className="event-feed-row" key={event.eventId}>
+          <span className="mono">{fmtTime(event.timestampMs)}</span>
+          <span><EventPill type={event.type} /></span>
+          <span className="mono strong">{event.trackId}</span>
+          <span>{event.zoneId} · {event.previousState} → {event.newState}</span>
+        </div>
+      ))}
+
+      {recent.length === 0 && <div className="event-feed-empty">No spatial events received yet.</div>}
+    </div>
+  )
+}
+
+function ServiceBadge({ service }: { service: ServiceInfo }) {
+  return (
+    <div className="service-badge">
+      <span className={`service-dot ${service.state.toLowerCase()}`} />
+      <div>
+        <div className="service-name">{service.name}</div>
+        <div className={`service-state ${service.state.toLowerCase()}`}>{service.state}</div>
+      </div>
+    </div>
+  )
+}
+
+function HeaderStat({ label, value, alert = false }: { label: string; value: string; alert?: boolean }) {
+  return <div className="header-stat"><span>{label}</span><strong className={alert ? 'alert-text' : ''}>{value}</strong></div>
+}
+
+function MetricCard({ label, value, unit, history }: { label: string; value: string; unit: string; history: number[] }) {
+  return (
+    <div className="metric-card">
+      <div className="metric-label">{label}</div>
+      <div className="metric-value">{value}</div>
+      <div className="metric-unit">{unit}</div>
+      <Sparkline values={history} />
+    </div>
+  )
+}
+
+function Sparkline({ values }: { values: number[] }) {
+  if (values.length < 2) return <div className="sparkline-placeholder" />
+  const max = Math.max(...values)
+  const min = Math.min(...values)
+  const span = Math.max(1e-9, max - min)
+
+  const points = values.map((value, index) => {
+    const x = (index / (values.length - 1)) * 100
+    const y = 88 - ((value - min) / span) * 68
+    return `${x},${y}`
+  }).join(' ')
+
+  return (
+    <svg className="sparkline" viewBox="0 0 100 100" preserveAspectRatio="none">
+      <polyline points={points} fill="none" stroke="currentColor" strokeWidth="2" vectorEffect="non-scaling-stroke" />
+    </svg>
+  )
+}
+
+function MiniEvent({ event }: { event: TrackEvent }) {
+  const colorClass = event.type === 'ZONE_ENTRY' ? 'entry' : event.type === 'ZONE_APPROACH' ? 'approach' : 'exit'
+  return (
+    <div className="mini-event">
+      <span className={`mini-event-dot ${colorClass}`} />
+      <div className="mini-event-time mono">{fmtTime(event.timestampMs)}</div>
+      <div className="mini-event-copy">
+        <strong className={colorClass}>{event.type.replace(/_/g, ' ')}</strong>
+        <span>{event.trackId} · {event.zoneId}</span>
+      </div>
+    </div>
+  )
+}
+
+function EventPill({ type }: { type: TrackEvent['type'] }) {
+  return <span className={`event-pill ${type.toLowerCase()}`}>{type.replace(/_/g, ' ')}</span>
+}
+
+function StatePill({ state }: { state: FusedTrack['state'] }) {
+  return <span className={`state-pill ${state.toLowerCase()}`}>{state}</span>
+}
+
+function StatusPill({ state }: { state: ServiceState }) {
+  return <span className={`status-pill ${state.toLowerCase()}`}>{state}</span>
+}
+
+function MapToggle({
+  icon,
+  label,
+  active,
+  onClick,
+}: {
+  icon: React.ReactNode
+  label: string
+  active: boolean
+  onClick: () => void
+}) {
+  return <button className={`map-toggle ${active ? 'active' : ''}`} onClick={onClick} title={label}>{icon}</button>
+}
+
+function LegendDot({ color, label }: { color: string; label: string }) {
+  return <div className="legend-row"><span className="legend-line" style={{ background: color }} />{label}</div>
+}
+
+function TabShell({ title, subtitle, children }: { title: string; subtitle: string; children: React.ReactNode }) {
+  return (
+    <div className="tab-shell">
+      <div className="tab-heading">
+        <div><h2>{title}</h2><p>{subtitle}</p></div>
+      </div>
+      {children}
+    </div>
+  )
+}
+
+function BigMetric({
+  label,
+  value,
+  unit,
+  good = false,
+}: {
+  label: string
+  value: string
+  unit: string
+  good?: boolean
+}) {
+  return (
+    <div className="big-metric">
+      <span>{label}</span>
+      <strong className={good ? 'good-value' : ''}>{value}</strong>
+      <small>{unit}</small>
+    </div>
+  )
+}
+
+function BenchmarkPanel({ title, children }: { title: string; children: React.ReactNode }) {
+  return <div className="benchmark-panel"><div className="benchmark-panel-title">{title}</div>{children}</div>
+}
+
+function TrendPanel({ label, values, unit }: { label: string; values: number[]; unit: string }) {
+  return (
+    <div className="trend-panel">
+      <div className="trend-head">
+        <span>{label}</span>
+        <strong>{values.length ? values[values.length - 1].toFixed(1) : '0.0'} {unit}</strong>
+      </div>
+      <Sparkline values={values} />
+    </div>
+  )
+}
+
+function SummaryStat({ label, value }: { label: string; value: string }) {
+  return <div className="summary-stat"><strong>{value}</strong><span>{label}</span></div>
+}
+
+function InfoRow({ label, value }: { label: string; value: string }) {
+  return <div className="info-row"><span>{label}</span><strong>{value}</strong></div>
+}
+
+function TransportRow({ label, connected }: { label: string; connected: boolean }) {
+  return (
+    <div className="transport-row">
+      <Wifi size={15} />
+      <span>{label}</span>
+      <strong className={connected ? 'ok-text' : 'alert-text'}>{connected ? 'CONNECTED' : 'OFFLINE'}</strong>
+    </div>
+  )
+}
+
+function EmptyState({ text }: { text: string }) {
+  return <div className="empty-state">{text}</div>
+}
+
+function syncZoneLayers(map: maplibregl.Map, zones: ZoneDefinition[], visible: boolean) {
+  const features = zones.flatMap(zone => [
+    zoneFeature(zone.advisory, zone, 'advisory'),
+    zoneFeature(zone.warning, zone, 'warning'),
+    zoneFeature(zone.core, zone, 'core'),
+  ])
+
+  const data = {
+    type: 'FeatureCollection',
+    features,
+  } as any
+
+  const existing = map.getSource('backend-zones') as maplibregl.GeoJSONSource | undefined
+  if (existing) {
+    existing.setData(data)
+  } else {
+    map.addSource('backend-zones', { type: 'geojson', data })
+
+    map.addLayer({
+      id: 'zones-core-fill',
+      type: 'fill',
+      source: 'backend-zones',
+      filter: ['==', ['get', 'level'], 'core'],
+      paint: {
+        'fill-color': ['get', 'color'],
+        'fill-opacity': 0.16,
+      },
+    } as any)
+
+    map.addLayer({
+      id: 'zones-advisory',
+      type: 'line',
+      source: 'backend-zones',
+      filter: ['==', ['get', 'level'], 'advisory'],
+      paint: {
+        'line-color': ['get', 'color'],
+        'line-width': 1.5,
+        'line-opacity': 0.45,
+        'line-dasharray': [4, 3],
+      },
+    } as any)
+
+    map.addLayer({
+      id: 'zones-warning',
+      type: 'line',
+      source: 'backend-zones',
+      filter: ['==', ['get', 'level'], 'warning'],
+      paint: {
+        'line-color': ['get', 'color'],
+        'line-width': 1.8,
+        'line-opacity': 0.68,
+        'line-dasharray': [5, 3],
+      },
+    } as any)
+
+    map.addLayer({
+      id: 'zones-core-line',
+      type: 'line',
+      source: 'backend-zones',
+      filter: ['==', ['get', 'level'], 'core'],
+      paint: {
+        'line-color': ['get', 'color'],
+        'line-width': 2.4,
+        'line-opacity': 0.94,
+        'line-dasharray': [5, 3],
+      },
+    } as any)
+  }
+
+  for (const layerId of ['zones-core-fill', 'zones-advisory', 'zones-warning', 'zones-core-line']) {
+    if (map.getLayer(layerId)) {
+      map.setLayoutProperty(layerId, 'visibility', visible ? 'visible' : 'none')
+    }
+  }
+}
+
+function zoneFeature(
+  coordinates: [number, number][],
+  zone: ZoneDefinition,
+  level: 'core' | 'warning' | 'advisory',
+) {
+  return {
+    type: 'Feature',
+    properties: {
+      zoneId: zone.zoneId,
+      label: zone.label,
+      color: zone.color,
+      level,
+    },
+    geometry: {
+      type: 'Polygon',
+      coordinates: [coordinates],
+    },
+  }
+}
+
+function appendHistory(values: number[], next: number) {
+  return [...values.slice(-39), Number.isFinite(next) ? next : 0]
+}
+
+function validLngLat(lng: number, lat: number) {
+  return Number.isFinite(lng) && Number.isFinite(lat) && Math.abs(lng) <= 180 && Math.abs(lat) <= 90
+}
+
+function stateRank(state: FusedTrack['state']) {
+  return state === 'CONFIRMED' ? 0 : state === 'COASTING' ? 1 : state === 'TENTATIVE' ? 2 : 3
+}
+
+function headingDeg(vx: number, vy: number) {
+  return (Math.atan2(vx, vy) * 180 / Math.PI + 360) % 360
+}
+
+function fmtTime(ms: number) {
+  if (!Number.isFinite(ms) || ms <= 0) return '—'
+  return new Date(ms).toISOString().slice(11, 19) + 'Z'
+}
+
+function fmtAge(ms: number) {
+  if (!Number.isFinite(ms)) return '—'
+  if (ms < 1_000) return `${Math.max(0, ms)} ms ago`
+  if (ms < 60_000) return `${(ms / 1_000).toFixed(1)} s ago`
+  return `${Math.floor(ms / 60_000)}m ago`
+}
+
+function fmtDuration(ms: number) {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1_000))
+  const days = Math.floor(totalSeconds / 86_400)
+  const hours = Math.floor((totalSeconds % 86_400) / 3_600)
+  const minutes = Math.floor((totalSeconds % 3_600) / 60)
+  const seconds = totalSeconds % 60
+
+  if (days) return `${days}d ${hours}h ${minutes}m`
+  if (hours) return `${hours}h ${minutes}m ${seconds}s`
+  if (minutes) return `${minutes}m ${seconds}s`
+  return `${seconds}s`
+}
+
+function fmtCompact(value: number) {
+  if (!Number.isFinite(value)) return '0'
+  if (Math.abs(value) >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`
+  if (Math.abs(value) >= 1_000) return `${(value / 1_000).toFixed(1)}K`
+  return Math.round(value).toLocaleString()
+}
 
 ReactDOM.createRoot(document.getElementById('root')!).render(<App />)
