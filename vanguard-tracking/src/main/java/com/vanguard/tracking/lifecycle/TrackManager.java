@@ -37,6 +37,16 @@ public class TrackManager {
     private final double initialVelocityVar;
 
     /*
+     * Runtime duplicate suppression.
+     *
+     * The tracker is intentionally truth-ID blind. These thresholds operate
+     * only on estimated kinematics and sensor provenance.
+     */
+    private static final double TENTATIVE_DUPLICATE_POSITION_M = 350.0;
+    private static final double CONFIRMED_DUPLICATE_POSITION_M = 220.0;
+    private static final double CONFIRMED_DUPLICATE_VELOCITY_MPS = 85.0;
+
+    /*
      * All sensor batches sharing the same timestamp belong to one
      * lifecycle observation cycle.
      *
@@ -301,6 +311,231 @@ public class TrackManager {
         tracks.put(trackId, track);
 
         return trackId;
+    }
+
+    /**
+     * Coalesce duplicate hypotheses after all sensors for one observation
+     * timestamp have been processed.
+     *
+     * A newly spawned TENTATIVE hypothesis can be close to an already stable
+     * track when one sensor briefly fails the statistical gate. Confirmed /
+     * coasting tracks are merged only when both position and velocity agree,
+     * which keeps opposing crossing targets distinct.
+     *
+     * @return number of hypotheses marked DROPPED
+     */
+    public int suppressDuplicateTracks() {
+        List<Track> alive =
+                new ArrayList<>(
+                        getAliveTracks()
+                );
+
+        Set<String> droppedIds =
+                new HashSet<>();
+
+        for (int i = 0; i < alive.size(); i++) {
+            Track first =
+                    alive.get(i);
+
+            if (!first.isAlive()
+                    || droppedIds.contains(
+                            first.getTrackId()
+                    )) {
+                continue;
+            }
+
+            for (int j = i + 1;
+                 j < alive.size();
+                 j++) {
+
+                Track second =
+                        alive.get(j);
+
+                if (!second.isAlive()
+                        || droppedIds.contains(
+                                second.getTrackId()
+                        )) {
+                    continue;
+                }
+
+                if (!isLikelyDuplicate(
+                        first,
+                        second
+                )) {
+                    continue;
+                }
+
+                Track survivor =
+                        chooseDuplicateSurvivor(
+                                first,
+                                second
+                        );
+
+                Track duplicate =
+                        survivor == first
+                                ? second
+                                : first;
+
+                survivor.absorbSensorSources(
+                        duplicate
+                );
+
+                duplicate.markDropped();
+
+                droppedIds.add(
+                        duplicate.getTrackId()
+                );
+
+                if (duplicate == first) {
+                    break;
+                }
+            }
+        }
+
+        return droppedIds.size();
+    }
+
+    private boolean isLikelyDuplicate(
+            Track first,
+            Track second) {
+
+        double dx =
+                first.getPx() -
+                        second.getPx();
+
+        double dy =
+                first.getPy() -
+                        second.getPy();
+
+        double positionDistance =
+                Math.hypot(
+                        dx,
+                        dy
+                );
+
+        boolean eitherTentative =
+                first.getState() == TrackState.TENTATIVE
+                        || second.getState() == TrackState.TENTATIVE;
+
+        if (eitherTentative) {
+            if (positionDistance
+                    > TENTATIVE_DUPLICATE_POSITION_M) {
+                return false;
+            }
+
+            boolean sharedSensor =
+                    !Collections.disjoint(
+                            first.getContributingSensors(),
+                            second.getContributingSensors()
+                    );
+
+            return positionDistance <= 180.0
+                    || sharedSensor;
+        }
+
+        if (positionDistance
+                > CONFIRMED_DUPLICATE_POSITION_M) {
+            return false;
+        }
+
+        double dvx =
+                first.getVx() -
+                        second.getVx();
+
+        double dvy =
+                first.getVy() -
+                        second.getVy();
+
+        double velocityDistance =
+                Math.hypot(
+                        dvx,
+                        dvy
+                );
+
+        return velocityDistance
+                <= CONFIRMED_DUPLICATE_VELOCITY_MPS;
+    }
+
+    private Track chooseDuplicateSurvivor(
+            Track first,
+            Track second) {
+
+        int firstStateScore =
+                stateQuality(
+                        first.getState()
+                );
+
+        int secondStateScore =
+                stateQuality(
+                        second.getState()
+                );
+
+        if (firstStateScore
+                != secondStateScore) {
+
+            return firstStateScore
+                    > secondStateScore
+                    ? first
+                    : second;
+        }
+
+        if (first.getTotalHits()
+                != second.getTotalHits()) {
+
+            return first.getTotalHits()
+                    > second.getTotalHits()
+                    ? first
+                    : second;
+        }
+
+        int firstSensors =
+                first.getContributingSensors()
+                        .size();
+
+        int secondSensors =
+                second.getContributingSensors()
+                        .size();
+
+        if (firstSensors != secondSensors) {
+            return firstSensors > secondSensors
+                    ? first
+                    : second;
+        }
+
+        double firstUncertainty =
+                first.getPositionUncertainty();
+
+        double secondUncertainty =
+                second.getPositionUncertainty();
+
+        if (Double.compare(
+                firstUncertainty,
+                secondUncertainty
+        ) != 0) {
+
+            return firstUncertainty
+                    < secondUncertainty
+                    ? first
+                    : second;
+        }
+
+        return first.getTrackId()
+                        .compareTo(
+                                second.getTrackId()
+                        ) <= 0
+                ? first
+                : second;
+    }
+
+    private int stateQuality(
+            TrackState state) {
+
+        return switch (state) {
+            case CONFIRMED -> 3;
+            case COASTING -> 2;
+            case TENTATIVE -> 1;
+            case DROPPED -> 0;
+        };
     }
 
     /** Remove dropped tracks from memory. */

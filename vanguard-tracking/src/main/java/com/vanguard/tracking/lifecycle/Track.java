@@ -147,6 +147,23 @@ public class Track {
             contributingSensors.add(sensorId);
         }
     }
+
+    /**
+     * Mark this hypothesis as terminal so the pipeline can publish one final
+     * DROPPED record before TrackManager prunes it.
+     */
+    public void markDropped() {
+        state = TrackState.DROPPED;
+    }
+
+    /** Merge source provenance when a duplicate hypothesis is coalesced. */
+    public void absorbSensorSources(Track other) {
+        if (other != null) {
+            contributingSensors.addAll(
+                    other.contributingSensors
+            );
+        }
+    }
     public boolean isAlive()             { return state != TrackState.DROPPED; }
 
     public double getPx() { return ekf.getPx(); }
