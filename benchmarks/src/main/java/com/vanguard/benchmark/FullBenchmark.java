@@ -129,7 +129,7 @@ public class FullBenchmark {
             MeasurementModel mm = makeMM(config.sensors().getFirst());
             NetworkImpairmentModel imp = new NetworkImpairmentModel(
                     new ScenarioConfig.ImpairmentSpec(loss, 0, 0, 0, loss > 0), new Random(99));
-            int maxCoast = 0, reacquisitions = 0, dupTracks = 0;
+            int maxCoast = 0, reacquisitions = 0, maxConcurrentDupTracks = 0;
             Map<String, String> trackTruthMap = new HashMap<>();
 
             for (long t = 100; t <= config.scenarioDurationMs(); t += 100) {
@@ -156,9 +156,7 @@ public class FullBenchmark {
                 for (var e : results.entrySet()) {
                     if (e.getValue() instanceof DataAssociator.AssociationResult.Associated a) {
                         String tid = tids.get(e.getKey());
-                        String existing = trackTruthMap.get(tid);
-                        if (existing != null && !existing.equals(a.trackId())) dupTracks++;
-                        trackTruthMap.putIfAbsent(tid, a.trackId());
+                        trackTruthMap.put(a.trackId(), tid);
                         eval.recordAssociation(a.trackId(), tid);
                         Track track = mgr.getTrack(a.trackId()).orElse(null);
                         TargetModel.TruthRecord tr = findTruth(truth, tid);
@@ -166,11 +164,28 @@ public class FullBenchmark {
                             eval.record(a.trackId(), tid, t, track.getPx(), track.getPy(), track.getVx(), track.getVy(), tr.px(), tr.py(), tr.vx(), tr.vy());
                     }
                 }
+                // Measure actual concurrent duplicate live tracks.
+                Map<String, Integer> aliveTracksPerTruth = new HashMap<>();
+                for (Track track : mgr.getAliveTracks()) {
+                    String tid = trackTruthMap.get(track.getTrackId());
+                    if (tid != null) {
+                        aliveTracksPerTruth.merge(tid, 1, Integer::sum);
+                    }
+                }
+
+                int concurrentDupTracks = 0;
+                for (int count : aliveTracksPerTruth.values()) {
+                    concurrentDupTracks += Math.max(0, count - 1);
+                }
+                maxConcurrentDupTracks =
+                        Math.max(maxConcurrentDupTracks, concurrentDupTracks);
+
                 maxCoast = Math.max(maxCoast, mgr.getCoastingCount());
             }
             var r = eval.evaluate();
-            System.out.printf("  %3.0f%% loss: RMSE=%.2fm  acc=%.1f%%  coast=%d  reacq=%d  dups=%d  frag=%d%n",
-                    loss * 100, r.positionRmse(), r.associationAccuracy() * 100, maxCoast, reacquisitions, dupTracks, r.trackFragmentation());
+            System.out.printf("  %3.0f%% loss: RMSE=%.2fm  acc=%.1f%%  coast=%d  reacq=%d  maxConcurrentDups=%d  frag=%d%n",
+                    loss * 100, r.positionRmse(), r.associationAccuracy() * 100,
+                    maxCoast, reacquisitions, maxConcurrentDupTracks, r.trackFragmentation());
         }
         System.out.println();
     }
