@@ -144,6 +144,283 @@ class AssociationAndLifecycleTest {
     }
 
     // ================================================================
+    // Tracking regression tests
+    // ================================================================
+
+    @Nested
+    @DisplayName("Tracking regressions")
+    class TrackingRegressionTests {
+
+        @Test
+        @DisplayName("Claimed nearest candidate falls back to second valid track")
+        void claimedNearestFallsBackToSecondCandidate() {
+            DataAssociator assoc = new DataAssociator();
+
+            ExtendedKalmanFilter ekf1 =
+                    makeEkf(1000, 500, 0, 0);
+
+            ExtendedKalmanFilter ekf2 =
+                    makeEkf(1040, 500, 0, 0);
+
+            SimpleMatrix z1 =
+                    SENSOR.h(ekf1.getState());
+
+            ExtendedKalmanFilter observation2 =
+                    makeEkf(1010, 500, 0, 0);
+
+            SimpleMatrix z2 =
+                    SENSOR.h(observation2.getState());
+
+            Map<Integer, DataAssociator.AssociationResult> results =
+                    assoc.associateBatch(
+                            List.of(z1, z2),
+                            SENSOR,
+                            List.of(
+                                    new DataAssociator.Candidate("T1", ekf1),
+                                    new DataAssociator.Candidate("T2", ekf2)
+                            )
+                    );
+
+            assertInstanceOf(
+                    DataAssociator.AssociationResult.Associated.class,
+                    results.get(0)
+            );
+
+            assertInstanceOf(
+                    DataAssociator.AssociationResult.Associated.class,
+                    results.get(1)
+            );
+
+            assertEquals(
+                    "T1",
+                    ((DataAssociator.AssociationResult.Associated)
+                            results.get(0)).trackId()
+            );
+
+            assertEquals(
+                    "T2",
+                    ((DataAssociator.AssociationResult.Associated)
+                            results.get(1)).trackId()
+            );
+        }
+
+        @Test
+        @DisplayName("Global assignment prevents greedy starvation")
+        void globalAssignmentPreventsGreedyStarvation() {
+            DataAssociator assoc =
+                    new DataAssociator(
+                            new MahalanobisGate(9.21),
+                            1_000.0
+                    );
+
+            ExtendedKalmanFilter track1 =
+                    makeEkf(
+                            1000,
+                            0,
+                            0,
+                            0
+                    );
+
+            ExtendedKalmanFilter track2 =
+                    makeEkf(
+                            1200,
+                            0,
+                            0,
+                            0
+                    );
+
+            /*
+             * Flexible observation:
+             * prefers T1, but can legitimately match T2.
+             */
+            SimpleMatrix flexibleObservation =
+                    SENSOR.h(
+                            makeEkf(
+                                    1080,
+                                    0,
+                                    0,
+                                    0
+                            ).getState()
+                    );
+
+            /*
+             * Constrained observation:
+             * can match T1, while T2 is outside the Mahalanobis gate.
+             *
+             * A greedy input-order algorithm assigns the flexible
+             * observation to T1 first and leaves this observation unmatched.
+             * The global optimum is:
+             *
+             * flexible    -> T2
+             * constrained -> T1
+             */
+            SimpleMatrix constrainedObservation =
+                    SENSOR.h(
+                            makeEkf(
+                                    990,
+                                    0,
+                                    0,
+                                    0
+                            ).getState()
+                    );
+
+            Map<Integer, DataAssociator.AssociationResult> results =
+                    assoc.associateBatch(
+                            List.of(
+                                    flexibleObservation,
+                                    constrainedObservation
+                            ),
+                            SENSOR,
+                            List.of(
+                                    new DataAssociator.Candidate(
+                                            "T1",
+                                            track1
+                                    ),
+                                    new DataAssociator.Candidate(
+                                            "T2",
+                                            track2
+                                    )
+                            )
+                    );
+
+            assertInstanceOf(
+                    DataAssociator.AssociationResult.Associated.class,
+                    results.get(0)
+            );
+
+            assertInstanceOf(
+                    DataAssociator.AssociationResult.Associated.class,
+                    results.get(1)
+            );
+
+            assertEquals(
+                    "T2",
+                    ((DataAssociator.AssociationResult.Associated)
+                            results.get(0)).trackId(),
+                    "Flexible observation should yield T1 to constrained observation"
+            );
+
+            assertEquals(
+                    "T1",
+                    ((DataAssociator.AssociationResult.Associated)
+                            results.get(1)).trackId(),
+                    "Constrained observation must retain its only valid track"
+            );
+        }
+        @Test
+        @DisplayName("New track does not immediately receive a miss")
+        void newTrackDoesNotImmediatelyMiss() {
+            TrackManager manager =
+                    new TrackManager(
+                            new DataAssociator(),
+                            MOTION,
+                            3,
+                            3,
+                            8,
+                            10_000,
+                            62_500
+                    );
+
+            ExtendedKalmanFilter truth =
+                    makeEkf(1000, 500, 0, 0);
+
+            SimpleMatrix z =
+                    SENSOR.h(truth.getState());
+
+            manager.processObservations(
+                    List.of(z),
+                    SENSOR,
+                    "S1",
+                    1000
+            );
+
+            Track track =
+                    manager.getAllTracks()
+                            .iterator()
+                            .next();
+
+            assertEquals(
+                    0,
+                    track.getConsecutiveMisses()
+            );
+
+            assertEquals(
+                    1,
+                    track.getConsecutiveHits()
+            );
+        }
+
+        @Test
+        @DisplayName("Multiple sensors at one timestamp count as one miss cycle")
+        void multipleSensorsSameTimestampCountAsOneMiss() {
+            TrackManager manager =
+                    new TrackManager(
+                            new DataAssociator(),
+                            MOTION,
+                            3,
+                            3,
+                            8,
+                            10_000,
+                            62_500
+                    );
+
+            ExtendedKalmanFilter truth =
+                    makeEkf(1000, 500, 0, 0);
+
+            SimpleMatrix z =
+                    SENSOR.h(truth.getState());
+
+            manager.processObservations(
+                    List.of(z),
+                    SENSOR,
+                    "S1",
+                    1000
+            );
+
+            Track track =
+                    manager.getAllTracks()
+                            .iterator()
+                            .next();
+
+            manager.processObservations(
+                    List.of(),
+                    SENSOR,
+                    "S1",
+                    2000
+            );
+
+            manager.processObservations(
+                    List.of(),
+                    SENSOR,
+                    "S2",
+                    2000
+            );
+
+            manager.processObservations(
+                    List.of(),
+                    SENSOR,
+                    "S3",
+                    2000
+            );
+
+            /*
+             * Timestamp 2000 remains one open observation cycle.
+             * Moving to 3000 finalizes it exactly once.
+             */
+            manager.processObservations(
+                    List.of(),
+                    SENSOR,
+                    "S1",
+                    3000
+            );
+
+            assertEquals(
+                    1,
+                    track.getConsecutiveMisses()
+            );
+        }
+    }
+    // ================================================================
     // Day 9: Track lifecycle
     // ================================================================
 
@@ -252,6 +529,41 @@ class AssociationAndLifecycleTest {
             assertTrue(uncAfter > uncBefore,
                     "Uncertainty should grow during coasting: %.1f -> %.1f"
                             .formatted(uncBefore, uncAfter));
+        }
+        @Test
+        @DisplayName("Multiple sensors at the same timestamp count as one confirmation hit")
+        void sameTimestampSensorsCountAsOneHit() {
+            Track t = makeTrack();
+
+            SimpleMatrix z = SENSOR.h(t.getEkf().getState());
+
+            // Track starts with one creation hit.
+            t.update(z, SENSOR, "S1", 1000);
+            assertEquals(2, t.getConsecutiveHits());
+
+            // Same observation timestamp from two additional sensors.
+            t.update(z, SENSOR, "S2", 1000);
+            t.update(z, SENSOR, "S3", 1000);
+
+            assertEquals(
+                    2,
+                    t.getConsecutiveHits(),
+                    "Same timestamp must count as one lifecycle hit"
+            );
+
+            assertEquals(
+                    TrackState.TENTATIVE,
+                    t.getState(),
+                    "Track must not confirm from three sensors in one time cycle"
+            );
+
+            // Next actual time cycle provides the third hit.
+            t.update(z, SENSOR, "S1", 2000);
+
+            assertEquals(
+                    TrackState.CONFIRMED,
+                    t.getState()
+            );
         }
     }
 }

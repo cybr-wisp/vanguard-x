@@ -75,6 +75,14 @@ public class PipelineOrchestrator {
     private static final double METERS_PER_DEG_LNG = 92_000.0;
     private static final double METERS_PER_DEG_LAT = 111_000.0;
 
+    private static final long SIM_TICK_MS = 70L;
+    private static final long DEMO_DURATION_MS = 90_000L;
+
+    private static final double R21_CENTER_LNG = -117.05;
+    private static final double R21_CENTER_LAT = 34.755;
+    private static final double R21_RADIUS_X_M = 2_200.0;
+    private static final double R21_RADIUS_Y_M = 1_800.0;
+
     @Value("${vanguard.kafka.bootstrap-servers}")
     private String bootstrapServers;
 
@@ -109,6 +117,21 @@ public class PipelineOrchestrator {
     private ScheduledExecutorService simExecutor;
     private DatagramSocket udpSocket;
     private InetAddress gatewayAddress;
+
+    /*
+     * Kafka polls are transport boundaries, not observation boundaries.
+     *
+     * Reports from one simulator timestamp may be split across consecutive
+     * polls. Keep the newest timestamp buffered until a later timestamp
+     * arrives, proving that the previous observation cycle is complete.
+     *
+     * Accessed only by the single tracking-consumer thread.
+     */
+    private final TreeMap<
+            Long,
+            Map<String, List<SimpleMatrix>>
+            > pendingRawBatches =
+            new TreeMap<>();
 
     public PipelineOrchestrator(ObjectMapper mapper) {
         this.mapper = mapper;
@@ -154,9 +177,17 @@ public class PipelineOrchestrator {
 
             MotionModel motionModel = new MotionModel(2.0);
 
+            /*
+             * Sensor bearing noise is 0.01 rad. At 20-35 km range that can
+             * correspond to several hundred meters of Cartesian uncertainty.
+             *
+             * The spatial grid is only a coarse candidate-pruning structure;
+             * the Mahalanobis gate remains the statistical acceptance test.
+             */
             DataAssociator associator =
                     new DataAssociator(
-                            new MahalanobisGate(9.21)
+                            new MahalanobisGate(9.21),
+                            1_000.0
                     );
 
             trackManager = new TrackManager(
@@ -166,7 +197,7 @@ public class PipelineOrchestrator {
                     3,
                     8,
                     10_000,
-                    100
+                    62_500
             );
 
             buildSpatialEngine();
@@ -232,7 +263,7 @@ public class PipelineOrchestrator {
             simExecutor.scheduleAtFixedRate(
                     this::tick,
                     1_000,
-                    70,
+                    SIM_TICK_MS,
                     TimeUnit.MILLISECONDS
             );
 
@@ -267,7 +298,7 @@ public class PipelineOrchestrator {
         }
 
         try {
-            simTimeMs += 100;
+            simTimeMs += SIM_TICK_MS;
 
             List<TargetModel.TruthRecord> truth =
                     world.truthAt(simTimeMs);
@@ -348,14 +379,13 @@ public class PipelineOrchestrator {
             List<ConsumerRecord<String, byte[]>> records) {
 
         /*
-         * Group by observation timestamp first, then sensor.
+         * Kafka poll boundaries are unrelated to simulator observation
+         * boundaries. Accumulate reports by wire timestamp across polls.
          *
-         * TrackManager expects one sensor batch representing one
-         * observation cycle.
+         * The simulator sends every report for timestamp T before beginning
+         * timestamp T+1. Therefore, once T+1 is visible in Kafka, T is a
+         * complete observation cycle and can safely be processed.
          */
-        TreeMap<Long, Map<String, List<SimpleMatrix>>> batches =
-                new TreeMap<>();
-
         for (ConsumerRecord<String, byte[]> record : records) {
             try {
                 String csv =
@@ -375,6 +405,7 @@ public class PipelineOrchestrator {
                 }
 
                 String sensorId = p[0];
+
                 long timestampMs =
                         Long.parseLong(p[1]);
 
@@ -400,7 +431,7 @@ public class PipelineOrchestrator {
                                 }
                         );
 
-                batches
+                pendingRawBatches
                         .computeIfAbsent(
                                 timestampMs,
                                 ignored -> new LinkedHashMap<>()
@@ -419,32 +450,68 @@ public class PipelineOrchestrator {
             }
         }
 
-        for (Map.Entry<
-                Long,
-                Map<String, List<SimpleMatrix>>
-                > timeEntry : batches.entrySet()) {
+        /*
+         * Always retain the newest observed timestamp.
+         *
+         * Any older timestamp is now complete because records are published
+         * in simulator order through the single raw-report stream.
+         */
+        if (pendingRawBatches.size() < 2) {
+            return List.of();
+        }
 
-            long timestampMs = timeEntry.getKey();
+        long newestTimestampMs =
+                pendingRawBatches.lastKey();
 
-            for (Map.Entry<
-                    String,
-                    List<SimpleMatrix>
-                    > sensorEntry
-                    : timeEntry.getValue().entrySet()) {
+        List<Long> readyTimestamps =
+                new ArrayList<>();
+
+        for (Long timestampMs : pendingRawBatches.keySet()) {
+            if (timestampMs >= newestTimestampMs) {
+                break;
+            }
+
+            readyTimestamps.add(timestampMs);
+        }
+
+        if (readyTimestamps.isEmpty()) {
+            return List.of();
+        }
+
+        /*
+         * Process completed timestamps strictly in chronological order.
+         *
+         * Sensor order is also deterministic rather than depending on packet
+         * arrival order. All measurements belonging to one sensor/timestamp
+         * reach DataAssociator together, allowing the global assignment
+         * solver to operate on the complete target set.
+         */
+        for (Long timestampMs : readyTimestamps) {
+
+            Map<String, List<SimpleMatrix>> sensorBatches =
+                    pendingRawBatches.remove(timestampMs);
+
+            if (sensorBatches == null) {
+                continue;
+            }
+
+            for (Map.Entry<String, MeasurementModel> modelEntry
+                    : measurementModels.entrySet()) {
 
                 String sensorId =
-                        sensorEntry.getKey();
+                        modelEntry.getKey();
 
-                MeasurementModel measurementModel =
-                        measurementModels.get(sensorId);
+                List<SimpleMatrix> measurements =
+                        sensorBatches.get(sensorId);
 
-                if (measurementModel == null) {
+                if (measurements == null
+                        || measurements.isEmpty()) {
                     continue;
                 }
 
                 trackManager.processObservations(
-                        sensorEntry.getValue(),
-                        measurementModel,
+                        measurements,
+                        modelEntry.getValue(),
                         sensorId,
                         timestampMs
                 );
@@ -483,7 +550,6 @@ public class PipelineOrchestrator {
 
         return output;
     }
-
     private Map<String, Object> encodeFusedTrack(Track track) {
 
         double xM = track.getPx();
@@ -760,18 +826,17 @@ public class PipelineOrchestrator {
                 new GeometryFactory();
 
         double cx =
-                (-117.05 - CENTER_LNG) *
+                (R21_CENTER_LNG - CENTER_LNG) *
                         METERS_PER_DEG_LNG;
 
         double cy =
-                (34.755 - CENTER_LAT) *
+                (R21_CENTER_LAT - CENTER_LAT) *
                         METERS_PER_DEG_LAT;
 
-        double rx =
-                0.06 * METERS_PER_DEG_LNG;
-
-        double ry =
-                0.04 * METERS_PER_DEG_LAT;
+        // Compact enough for clear approach/entry/exit transitions in a
+        // short live demo, while still large enough for spatial buffering.
+        double rx = R21_RADIUS_X_M;
+        double ry = R21_RADIUS_Y_M;
 
         Coordinate[] coordinates =
                 new Coordinate[65];
@@ -815,73 +880,69 @@ public class PipelineOrchestrator {
 
         List<ScenarioConfig.TargetSpec> targets =
                 List.of(
+                        // West -> east: direct R-21 penetration.
                         new ScenarioConfig.TargetSpec(
                                 "TGT-01",
                                 0,
-                                (-0.15) * METERS_PER_DEG_LNG,
-                                0.05 * METERS_PER_DEG_LAT,
-                                25,
-                                -5,
+                                4_000,
+                                1_665,
+                                170,
+                                0,
                                 List.of(
-                                        ScenarioConfig.SegmentSpec.straight(15),
-                                        ScenarioConfig.SegmentSpec.turn(20, 0.02),
-                                        ScenarioConfig.SegmentSpec.straight(15)
+                                        ScenarioConfig.SegmentSpec.straight(90)
                                 )
                         ),
 
+                        // East -> west: opposing crossing through R-21.
                         new ScenarioConfig.TargetSpec(
                                 "TGT-02",
-                                0,
-                                0.12 * METERS_PER_DEG_LNG,
-                                0.06 * METERS_PER_DEG_LAT,
-                                -20,
-                                -10,
+                                4_000,
+                                15_500,
+                                2_600,
+                                -180,
+                                10,
                                 List.of(
-                                        ScenarioConfig.SegmentSpec.straight(20),
-                                        ScenarioConfig.SegmentSpec.turn(15, -0.015),
-                                        ScenarioConfig.SegmentSpec.straight(15)
+                                        ScenarioConfig.SegmentSpec.straight(90)
                                 )
                         ),
 
+                        // South -> north: vertical penetration.
                         new ScenarioConfig.TargetSpec(
                                 "TGT-03",
-                                0,
-                                -0.05 * METERS_PER_DEG_LNG,
-                                -0.06 * METERS_PER_DEG_LAT,
-                                8,
-                                18,
+                                8_000,
+                                8_600,
+                                -4_500,
+                                10,
+                                170,
                                 List.of(
-                                        ScenarioConfig.SegmentSpec.straight(15),
-                                        ScenarioConfig.SegmentSpec.turn(10, 0.03),
-                                        ScenarioConfig.SegmentSpec.straight(25)
+                                        ScenarioConfig.SegmentSpec.straight(90)
                                 )
                         ),
 
+                        // Boundary skimmer: enters the advisory/warning buffer
+                        // but remains outside the restricted polygon.
                         new ScenarioConfig.TargetSpec(
                                 "TGT-04",
                                 2_000,
-                                0.08 * METERS_PER_DEG_LNG,
-                                0.02 * METERS_PER_DEG_LAT,
-                                -5,
-                                3,
+                                2_500,
+                                4_200,
+                                160,
+                                0,
                                 List.of(
-                                        ScenarioConfig.SegmentSpec.straight(20),
-                                        ScenarioConfig.SegmentSpec.turn(25, -0.01),
-                                        ScenarioConfig.SegmentSpec.straight(5)
+                                        ScenarioConfig.SegmentSpec.straight(88)
                                 )
                         ),
 
+                        // Fast southwest -> northeast diagonal penetration.
                         new ScenarioConfig.TargetSpec(
                                 "TGT-05",
-                                1_000,
-                                -0.10 * METERS_PER_DEG_LNG,
-                                0.08 * METERS_PER_DEG_LAT,
-                                30,
-                                -15,
+                                9_000,
+                                1_500,
+                                -4_500,
+                                190,
+                                125,
                                 List.of(
-                                        ScenarioConfig.SegmentSpec.straight(10),
-                                        ScenarioConfig.SegmentSpec.turn(15, 0.025),
-                                        ScenarioConfig.SegmentSpec.straight(25)
+                                        ScenarioConfig.SegmentSpec.straight(89)
                                 )
                         )
                 );
@@ -899,7 +960,7 @@ public class PipelineOrchestrator {
                                 5,
                                 0.001,
                                 100,
-                                0.02
+                                0.0
                         ),
 
                         new ScenarioConfig.SensorSpec(
@@ -913,7 +974,7 @@ public class PipelineOrchestrator {
                                 5,
                                 0.001,
                                 100,
-                                0.02
+                                0.0
                         ),
 
                         new ScenarioConfig.SensorSpec(
@@ -927,14 +988,14 @@ public class PipelineOrchestrator {
                                 5,
                                 0.001,
                                 100,
-                                0.02
+                                0.0
                         )
                 );
 
         return new ScenarioConfig(
                 "demo-live",
                 42L,
-                50_000L,
+                DEMO_DURATION_MS,
                 targets,
                 sensorSpecs,
                 new ScenarioConfig.ImpairmentSpec(

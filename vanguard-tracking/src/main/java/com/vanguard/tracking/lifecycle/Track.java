@@ -21,6 +21,7 @@ public class Track {
     private int consecutiveHits;
     private int consecutiveMisses;
     private int totalHits;
+    private long lastHitMs;
     private final Set<String> contributingSensors = new HashSet<>();
 
     // Configurable thresholds
@@ -38,6 +39,7 @@ public class Track {
         this.consecutiveHits = 1;  // the observation that created the track counts
         this.consecutiveMisses = 0;
         this.totalHits = 1;
+        this.lastHitMs = creationTimeMs;
         this.hitsToConfirm = hitsToConfirm;
         this.missesToCoast = missesToCoast;
         this.missesToDrop = missesToDrop;
@@ -50,6 +52,7 @@ public class Track {
         double dt = (timeMs - lastUpdateMs) / 1000.0;
         if (dt > 0) {
             ekf.predict(dt);
+            lastUpdateMs = timeMs;
         }
     }
 
@@ -66,21 +69,30 @@ public class Track {
 
         ekf.update(measurement, sensorModel);
         lastUpdateMs = observationMs;
-        consecutiveHits++;
-        consecutiveMisses = 0;
-        totalHits++;
         contributingSensors.add(sensorId);
 
-        // Lifecycle transitions on hit
-        switch (state) {
-            case TENTATIVE -> {
-                if (consecutiveHits >= hitsToConfirm) {
-                    state = TrackState.CONFIRMED;
+        /*
+         * Multiple sensors may update this track at the same timestamp.
+         * Those measurements all improve the EKF, but together they represent
+         * one lifecycle hit, not several independent time cycles.
+         */
+        if (observationMs > lastHitMs) {
+            lastHitMs = observationMs;
+            consecutiveHits++;
+            consecutiveMisses = 0;
+            totalHits++;
+
+            // Lifecycle transitions on one new observation cycle hit.
+            switch (state) {
+                case TENTATIVE -> {
+                    if (consecutiveHits >= hitsToConfirm) {
+                        state = TrackState.CONFIRMED;
+                    }
                 }
+                case COASTING -> state = TrackState.CONFIRMED;
+                case CONFIRMED -> {}
+                case DROPPED -> {}
             }
-            case COASTING -> state = TrackState.CONFIRMED; // reacquisition
-            case CONFIRMED -> {} // stay confirmed
-            case DROPPED -> {} // terminal, should not receive updates
         }
     }
 

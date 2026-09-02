@@ -36,6 +36,16 @@ public class TrackManager {
     private final double initialPositionVar;
     private final double initialVelocityVar;
 
+    /*
+     * All sensor batches sharing the same timestamp belong to one
+     * lifecycle observation cycle.
+     *
+     * A track is missed only when the timestamp advances and no sensor
+     * updated that track during the completed cycle.
+     */
+    private long activeObservationMs = Long.MIN_VALUE;
+    private final Set<String> updatedInActiveCycle = new HashSet<>();
+
     public TrackManager(DataAssociator associator, MotionModel motionModel,
                         int hitsToConfirm, int missesToCoast, int missesToDrop,
                         double initialPositionVar, double initialVelocityVar) {
@@ -68,11 +78,17 @@ public class TrackManager {
             String sensorId,
             long observationMs) {
 
-        // 1. Build candidate list from alive tracks
+        /*
+         * Start a new lifecycle cycle only when the observation timestamp
+         * advances. This also predicts every alive track to the observation
+         * time before Mahalanobis gating.
+         */
+        beginObservationCycleIfNeeded(observationMs);
+
+        // 1. Build candidate list from predicted alive tracks.
         List<Candidate> candidates = new ArrayList<>();
         for (Track t : tracks.values()) {
             if (t.isAlive()) {
-                // Predict a copy to observation time for gating (don't modify original yet)
                 candidates.add(new Candidate(t.getTrackId(), t.getEkf()));
             }
         }
@@ -81,8 +97,6 @@ public class TrackManager {
         Map<Integer, AssociationResult> results =
                 associator.associateBatch(measurements, sensorModel, candidates);
 
-        // 3. Track which tracks got updated
-        Set<String> updatedTracks = new HashSet<>();
 
         for (var entry : results.entrySet()) {
             int obsIdx = entry.getKey();
@@ -93,22 +107,74 @@ public class TrackManager {
                 Track track = tracks.get(a.trackId());
                 if (track != null) {
                     track.update(measurements.get(obsIdx), sensorModel, sensorId, observationMs);
-                    updatedTracks.add(a.trackId());
+                    updatedInActiveCycle.add(a.trackId());
                 }
             } else {
-                // Unassociated: create a new tentative track
-                initializeTrack(measurements.get(obsIdx), sensorModel, sensorId, observationMs);
+                // Unassociated: create a new tentative track.
+                // The creating observation counts as an update in this cycle,
+                // so the new track must not immediately receive a miss.
+                String newTrackId =
+                        initializeTrack(
+                                measurements.get(obsIdx),
+                                sensorModel,
+                                sensorId,
+                                observationMs
+                        );
+
+                updatedInActiveCycle.add(newTrackId);
             }
         }
 
-        // 4. Record misses for alive tracks that were not updated
-        for (Track t : tracks.values()) {
-            if (t.isAlive() && !updatedTracks.contains(t.getTrackId())) {
-                t.recordMiss(observationMs);
-            }
-        }
-
+        /*
+         * Misses are intentionally NOT recorded here.
+         *
+         * More sensor batches may still arrive with this exact timestamp.
+         * The lifecycle cycle is finalized only when a newer timestamp is
+         * observed.
+         */
         return results;
+    }
+
+    /**
+     * Start a new observation cycle when the timestamp advances.
+     *
+     * The previous cycle is finalized exactly once, irrespective of how many
+     * sensors participated in it. Tracks are then predicted to the new
+     * timestamp before association.
+     */
+    private void beginObservationCycleIfNeeded(long observationMs) {
+        if (activeObservationMs == observationMs) {
+            return;
+        }
+
+        if (activeObservationMs != Long.MIN_VALUE) {
+            finalizeActiveObservationCycle();
+        }
+
+        activeObservationMs = observationMs;
+        updatedInActiveCycle.clear();
+
+        for (Track track : tracks.values()) {
+            if (track.isAlive()) {
+                track.predictTo(observationMs);
+            }
+        }
+    }
+
+    /**
+     * Apply at most one lifecycle miss to each alive track for the completed
+     * observation timestamp.
+     */
+    private void finalizeActiveObservationCycle() {
+        for (Track track : tracks.values()) {
+            if (track.isAlive()
+                    && !updatedInActiveCycle.contains(track.getTrackId())) {
+
+                track.recordMiss(activeObservationMs);
+            }
+        }
+
+        updatedInActiveCycle.clear();
     }
 
     /**
@@ -116,20 +182,115 @@ public class TrackManager {
      * Position is derived from the sensor position + measurement (range/bearing).
      * Velocity is initialized to zero with high uncertainty.
      */
-    private void initializeTrack(SimpleMatrix measurement, MeasurementModel sensorModel,
-                                  String sensorId, long observationMs) {
+    private String initializeTrack(SimpleMatrix measurement, MeasurementModel sensorModel,
+                                   String sensorId, long observationMs) {
         double range   = measurement.get(0);
         double bearing = measurement.get(1);
 
-        double px = sensorModel.getSx() + range * Math.cos(bearing);
-        double py = sensorModel.getSy() + range * Math.sin(bearing);
+        double cos = Math.cos(bearing);
+        double sin = Math.sin(bearing);
 
-        SimpleMatrix x0 = new SimpleMatrix(new double[][]{{px}, {py}, {0}, {0}});
-        SimpleMatrix P0 = SimpleMatrix.identity(4);
-        P0.set(0, 0, initialPositionVar);
-        P0.set(1, 1, initialPositionVar);
-        P0.set(2, 2, initialVelocityVar);
-        P0.set(3, 3, initialVelocityVar);
+        double px =
+                sensorModel.getSx() +
+                        range * cos;
+
+        double py =
+                sensorModel.getSy() +
+                        range * sin;
+
+        SimpleMatrix x0 =
+                new SimpleMatrix(
+                        new double[][]{
+                                {px},
+                                {py},
+                                {0},
+                                {0}
+                        }
+                );
+
+        /*
+         * Transform the sensor's polar measurement covariance
+         * [range, bearing] into Cartesian position covariance.
+         *
+         * The bearing contribution grows with range, which is critical for
+         * long-range sensors. A fixed isotropic position covariance makes a
+         * newly-created track unrealistically confident and can cause another
+         * sensor observing the same target to spawn a duplicate track.
+         */
+        SimpleMatrix measurementNoise =
+                sensorModel.noiseCovariance();
+
+        double rangeVariance =
+                measurementNoise.get(0, 0);
+
+        double bearingVariance =
+                measurementNoise.get(1, 1);
+
+        double rangeSquared =
+                range * range;
+
+        double varX =
+                cos * cos * rangeVariance +
+                        rangeSquared *
+                                sin * sin *
+                                bearingVariance;
+
+        double varY =
+                sin * sin * rangeVariance +
+                        rangeSquared *
+                                cos * cos *
+                                bearingVariance;
+
+        double covXY =
+                sin * cos *
+                        (
+                                rangeVariance -
+                                        rangeSquared *
+                                                bearingVariance
+                        );
+
+        SimpleMatrix P0 =
+                new SimpleMatrix(4, 4);
+
+        /*
+         * initialPositionVar is retained as a conservative Cartesian
+         * uncertainty floor in addition to the propagated sensor noise.
+         */
+        P0.set(
+                0,
+                0,
+                varX + initialPositionVar
+        );
+
+        P0.set(
+                1,
+                1,
+                varY + initialPositionVar
+        );
+
+        P0.set(
+                0,
+                1,
+                covXY
+        );
+
+        P0.set(
+                1,
+                0,
+                covXY
+        );
+
+        P0.set(
+                2,
+                2,
+                initialVelocityVar
+        );
+
+        P0.set(
+                3,
+                3,
+                initialVelocityVar
+        );
 
         ExtendedKalmanFilter ekf = new ExtendedKalmanFilter(x0, P0, motionModel);
         String trackId = "TRK-%06d".formatted(trackIdCounter.incrementAndGet());
@@ -138,6 +299,8 @@ public class TrackManager {
                 hitsToConfirm, missesToCoast, missesToDrop);
         track.addContributingSensor(sensorId);
         tracks.put(trackId, track);
+
+        return trackId;
     }
 
     /** Remove dropped tracks from memory. */
