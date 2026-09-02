@@ -36,3 +36,4 @@ logs/
 # Gradle (just in case)
 .gradle/
 build/
+*.bak
