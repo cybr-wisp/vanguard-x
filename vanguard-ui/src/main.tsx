@@ -1,8 +1,9 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+﻿import React, { useEffect, useMemo, useRef, useState } from 'react'
 import ReactDOM from 'react-dom/client'
 import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import './styles.css'
+import './glowup.css'
 import {
   Activity,
   AlertTriangle,
@@ -34,7 +35,7 @@ const METERS_PER_DEG_LNG = 92_000
 const METERS_PER_DEG_LAT = 111_000
 const TRACK_STALE_MS = 10_000
 
-const CARTO_KEY = (import.meta.env.VITE_CARTO_API_KEY as string | undefined)?.trim() || ''
+const SATELLITE_BASEMAP = true
 
 const SENSORS = [
   { id: 'SSA-01', lng: -117.35, lat: 34.79, type: 'Range / bearing sensor' },
@@ -128,7 +129,7 @@ function App() {
         trail.push({ lng: track.px, lat: track.py, ts: track.lastUpdateMs })
       }
 
-      const cutoff = track.lastUpdateMs - 60_000
+      const cutoff = track.lastUpdateMs - 35_000
       while (trail.length && trail[0].ts < cutoff) trail.shift()
       if (trail.length > 1_500) trail.splice(0, trail.length - 1_500)
       trails.current.set(id, trail)
@@ -229,8 +230,39 @@ function App() {
   ])
 
   const operational = trackConnected && eventConnected && metricsConnected && zonesConnected
-  const alertCount = events.filter(event => event.type === 'ZONE_ENTRY').length
-  const uptime = metrics ? fmtDuration(metrics.uptimeMs) : '—'
+  const alertCount = useMemo(() => {
+    const aliveIds = new Set(aliveTracks.map(([id]) => id))
+    const breachState = new Map<string, boolean>()
+
+    const ordered = [...events].sort(
+      (a, b) => a.timestampMs - b.timestampMs
+    )
+
+    for (const event of ordered) {
+      const key = `${event.trackId}|${event.zoneId}`
+
+      if (event.type === 'ZONE_ENTRY') {
+        breachState.set(key, true)
+      } else if (event.type === 'ZONE_EXIT') {
+        breachState.set(key, false)
+      }
+    }
+
+    let activeBreaches = 0
+
+    for (const [key, active] of breachState) {
+      if (!active) continue
+
+      const trackId = key.split('|')[0]
+
+      if (aliveIds.has(trackId)) {
+        activeBreaches++
+      }
+    }
+
+    return activeBreaches
+  }, [events, aliveTracks])
+  const uptime = metrics ? fmtDuration(metrics.uptimeMs) : 'â€”'
 
   const centerTrack = (track: FusedTrack) => {
     setTab('OVERVIEW')
@@ -432,31 +464,54 @@ function MapView({
   useEffect(() => {
     if (!mapContainer.current || mapRef.current) return
 
-    const sources: Record<string, any> = {}
-    const styleLayers: any[] = [
-      { id: 'background', type: 'background', paint: { 'background-color': '#d7e0e8' } },
-    ]
-
-    if (CARTO_KEY) {
-      sources.carto = {
+    const sources: Record<string, any> = {
+      imagery: {
         type: 'raster',
-        tiles: [`https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png?key=${encodeURIComponent(CARTO_KEY)}`],
+        tiles: [
+          'https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+        ],
         tileSize: 256,
-        attribution: '© OpenStreetMap contributors, © CARTO',
-      }
-      styleLayers.push({
-        id: 'carto',
+        attribution: 'Esri, Maxar, Earthstar Geographics, and the GIS User Community',
+      },
+      reference: {
         type: 'raster',
-        source: 'carto',
+        tiles: [
+          'https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
+        ],
+        tileSize: 256,
+        attribution: 'Esri',
+      },
+    }
+
+    const styleLayers: any[] = [
+      {
+        id: 'background',
+        type: 'background',
+        paint: {
+          'background-color': '#070b0c',
+        },
+      },
+      {
+        id: 'world-imagery',
+        type: 'raster',
+        source: 'imagery',
         paint: {
           'raster-opacity': 1,
-          'raster-saturation': -0.08,
-          'raster-contrast': 0.03,
-          'raster-brightness-min': 0.02,
-          'raster-brightness-max': 0.98,
+          'raster-saturation': -0.10,
+          'raster-contrast': 0.12,
+          'raster-brightness-min': 0.03,
+          'raster-brightness-max': 0.90,
         },
-      })
-    }
+      },
+      {
+        id: 'world-reference',
+        type: 'raster',
+        source: 'reference',
+        paint: {
+          'raster-opacity': 0.94,
+        },
+      },
+    ]
 
     const map = new maplibregl.Map({
       container: mapContainer.current,
@@ -529,10 +584,6 @@ function MapView({
         </div>
       )}
 
-      {!CARTO_KEY && (
-        <div className="map-key-banner">Basemap disabled · add VITE_CARTO_API_KEY</div>
-      )}
-
       <div className="zone-caption">
         <div>{zones.length} ACTIVE GEOFENCES</div>
         <span>BACKEND-SYNCHRONIZED CORE / WARNING / ADVISORY GEOMETRY</span>
@@ -551,25 +602,37 @@ function MapView({
           const point = mapRef.current!.project(zone.center)
           return (
             <g key={`label-${zone.zoneId}`} className="zone-svg-label">
-              <rect x={point.x - 56} y={point.y - 13} width={112} height={27} rx={4} fill="rgba(255,255,255,.9)" stroke={zone.color} strokeWidth={1} />
+              <rect x={point.x - 47} y={point.y - 11} width={94} height={23} rx={2} fill="rgba(255,255,255,.9)" stroke={zone.color} strokeWidth={1} />
               <text x={point.x} y={point.y - 1} textAnchor="middle" fill={zone.color} fontSize={10} fontWeight={750}>{zone.zoneId}</text>
               <text x={point.x} y={point.y + 9} textAnchor="middle" fill="#627080" fontSize={7.5}>RESTRICTED AIRSPACE</text>
             </g>
           )
         })}
 
-        {mapRef.current && layers.tracks && aliveTracks.map(([id, track]) => {
+        {mapRef.current && layers.tracks && aliveTracks.map(([id, track], trackIndex) => {
           const map = mapRef.current!
           const point = map.project([track.px, track.py])
           const color = TRACK_COLORS[track.state]
           const selected = selectedId === id
           const heading = headingDeg(track.vx, track.vy)
-          const headingRad = (heading - 90) * Math.PI / 180
-          const arrowLength = 28
-          const arrowX = point.x + arrowLength * Math.cos(headingRad)
-          const arrowY = point.y + arrowLength * Math.sin(headingRad)
           const speedMps = Math.hypot(track.vx, track.vy)
           const trail = trails.current.get(id) || []
+
+          // Deterministic tactical label staggering keeps dense
+          // multi-target scenes readable without moving the track itself.
+          const labelOffsets = [
+            { x: 13,   y: -25 },
+            { x: 15,   y: 12 },
+            { x: -126, y: -27 },
+            { x: -126, y: 11 },
+            { x: 18,   y: -43 },
+            { x: -126, y: -45 },
+            { x: 20,   y: 27 },
+            { x: -126, y: 27 }
+          ]
+
+          const labelOffset =
+            labelOffsets[trackIndex % labelOffsets.length]
 
           const ellipseMajorM = Math.max(1, (track.ellipseMajor ?? track.uncertainty * 2) / 2)
           const ellipseMinorM = Math.max(1, (track.ellipseMinor ?? track.uncertainty * 1.2) / 2)
@@ -588,9 +651,9 @@ function MapView({
                   }).join(' ')}
                   fill="none"
                   stroke={color}
-                  strokeWidth={1.8}
-                  opacity={0.55}
-                  strokeDasharray="5 4"
+                  strokeWidth={1.6}
+                  opacity={0.72}
+                  strokeDasharray="7 6"
                 />
               )}
 
@@ -608,18 +671,51 @@ function MapView({
                   strokeDasharray="4 3"
                 />
               )}
+              {selected && (
+                <circle
+                  cx={point.x}
+                  cy={point.y}
+                  r={18}
+                  fill="none"
+                  stroke="#fff6d7"
+                  strokeWidth={1}
+                  opacity={0.72}
+                  strokeDasharray="3 4"
+                />
+              )}
 
-              <line x1={point.x} y1={point.y} x2={arrowX} y2={arrowY} stroke={color} strokeWidth={2.2} opacity={0.92} />
-              <polygon
-                points={`${arrowX},${arrowY} ${arrowX - 7 * Math.cos(headingRad - 0.42)},${arrowY - 7 * Math.sin(headingRad - 0.42)} ${arrowX - 7 * Math.cos(headingRad + 0.42)},${arrowY - 7 * Math.sin(headingRad + 0.42)}`}
-                fill={color}
-              />
-              <circle cx={point.x} cy={point.y} r={selected ? 6 : 4} fill={color} stroke={selected ? '#ffffff' : '#132230'} strokeWidth={selected ? 2 : 1.5} />
+              <g
+                transform={`translate(${point.x} ${point.y}) rotate(${heading})`}
+                className="aircraft-glyph"
+              >
+                <path
+                  d="M0,-13
+                     L2.2,-4.5
+                     L10.5,-1
+                     L10.5,1.5
+                     L2.8,1.2
+                     L1.6,8.5
+                     L5,11
+                     L5,12.5
+                     L0,10.8
+                     L-5,12.5
+                     L-5,11
+                     L-1.6,8.5
+                     L-2.8,1.2
+                     L-10.5,1.5
+                     L-10.5,-1
+                     L-2.2,-4.5
+                     Z"
+                  fill={selected ? '#fff8d8' : color}
+                  stroke="#06100f"
+                  strokeWidth={1.1}
+                />
+              </g>
 
-              <g transform={`translate(${point.x + 12},${point.y - 18})`}>
-                <rect width={140} height={34} rx={5} fill={selected ? 'rgba(17,34,47,.96)' : 'rgba(17,34,47,.91)'} stroke={color} strokeWidth={selected ? 1.4 : 0.8} />
+              <g transform={`translate(${point.x + labelOffset.x},${point.y + labelOffset.y}) scale(0.84)`}>
+                <rect width={140} height={34} rx={2} fill={selected ? 'rgba(6,13,14,.96)' : 'rgba(6,13,14,.88)'} stroke={color} strokeWidth={selected ? 1.4 : 0.8} />
                 <text x={9} y={13} fill="#f4f7fa" fontSize={10.5} fontWeight={750}>{id}</text>
-                <text x={9} y={26} fill="#a7b4c0" fontSize={8.5}>{track.state} · {Math.round(speedMps)} m/s</text>
+                <text x={9} y={26} fill="#a7b4c0" fontSize={8.5}>{track.state} Â· {Math.round(speedMps)} m/s</text>
               </g>
             </g>
           )
@@ -629,7 +725,7 @@ function MapView({
           const point = mapRef.current!.project([sensor.lng, sensor.lat])
           return (
             <g key={sensor.id}>
-              <circle cx={point.x} cy={point.y} r={11} fill="rgba(255,255,255,.92)" stroke="#7549bb" strokeWidth={1.8} />
+              <circle cx={point.x} cy={point.y} r={11} fill="rgba(255,255,255,.92)" stroke="#7549bb" strokeWidth={1.6} />
               <circle cx={point.x} cy={point.y} r={3.5} fill="#7549bb" />
               <text x={point.x} y={point.y + 25} fill="#293746" fontSize={10} textAnchor="middle" fontWeight={750}>{sensor.id}</text>
             </g>
@@ -662,9 +758,9 @@ function TracksTab({
                 <td className="mono strong">{id}</td>
                 <td><StatePill state={track.state} /></td>
                 <td>{Math.hypot(track.vx, track.vy).toFixed(1)} m/s</td>
-                <td>{Math.round(headingDeg(track.vx, track.vy))}°</td>
+                <td>{Math.round(headingDeg(track.vx, track.vy))}Â°</td>
                 <td>{track.uncertainty.toFixed(1)} m</td>
-                <td>{track.contributingSensors?.join(', ') || '—'}</td>
+                <td>{track.contributingSensors?.join(', ') || 'â€”'}</td>
                 <td>{fmtAge(now - track.lastUpdateMs)}</td>
               </tr>
             ))}
@@ -690,7 +786,7 @@ function EventsTab({ events }: { events: TrackEvent[] }) {
                 <td><EventPill type={event.type} /></td>
                 <td className="mono strong">{event.trackId}</td>
                 <td>{event.zoneId}</td>
-                <td>{event.previousState} → {event.newState}</td>
+                <td>{event.previousState} â†’ {event.newState}</td>
                 <td className="mono">{event.py.toFixed(4)}, {event.px.toFixed(4)}</td>
               </tr>
             ))}
@@ -760,7 +856,7 @@ function AnalyticsTab({
         <ShieldCheck size={18} />
         <div>
           <strong>Measured benchmark reference</strong>
-          <span>{BENCHMARK.throughput[200].toLocaleString()} reports/s @ 200 targets · {BENCHMARK.positionRmse.toFixed(2)} m RMSE · {BENCHMARK.association}% association</span>
+          <span>{BENCHMARK.throughput[200].toLocaleString()} reports/s @ 200 targets Â· {BENCHMARK.positionRmse.toFixed(2)} m RMSE Â· {BENCHMARK.association}% association</span>
         </div>
       </div>
     </TabShell>
@@ -828,7 +924,7 @@ function SystemTab({
 
 function BenchmarksTab() {
   return (
-    <TabShell title="Benchmark Results" subtitle={`Measured ${BENCHMARK.date} · JVM ${BENCHMARK.jvm} · ${BENCHMARK.cores} cores · FullBenchmark`}>
+    <TabShell title="Benchmark Results" subtitle={`Measured ${BENCHMARK.date} Â· JVM ${BENCHMARK.jvm} Â· ${BENCHMARK.cores} cores Â· FullBenchmark`}>
       <div className="benchmark-hero-grid">
         <BigMetric label="Position RMSE" value={BENCHMARK.positionRmse.toFixed(2)} unit="m" good />
         <BigMetric label="Association" value={`${BENCHMARK.association}%`} unit="accuracy" good />
@@ -848,11 +944,11 @@ function BenchmarksTab() {
           <InfoRow label="Raw RMSE" value={`${BENCHMARK.rawRmse.toFixed(2)} m`} />
           <InfoRow label="Fused RMSE" value={`${BENCHMARK.fusedRmse.toFixed(2)} m`} />
           <InfoRow label="Improvement" value={`${BENCHMARK.fusionGain}%`} />
-          <InfoRow label="Event deduplication" value="1000 → 1" />
-          <InfoRow label="Replay determinism" value="IDENTICAL · Δ 0.00e+00 m" />
+          <InfoRow label="Event deduplication" value="1000 â†’ 1" />
+          <InfoRow label="Replay determinism" value="IDENTICAL Â· Î” 0.00e+00 m" />
         </BenchmarkPanel>
 
-        <BenchmarkPanel title="Throughput · after spatial index">
+        <BenchmarkPanel title="Throughput Â· after spatial index">
           {Object.entries(BENCHMARK.throughput).map(([targets, rate]) => (
             <InfoRow key={targets} label={`${targets} targets`} value={`${rate.toLocaleString()} reports/s`} />
           ))}
@@ -933,14 +1029,14 @@ function TrackInspector({
       </div>
 
       <div className="inspector-grid">
-        <InfoRow label="Ground speed" value={`${speedMps.toFixed(1)} m/s · ${Math.round(speedKnots)} kt`} />
-        <InfoRow label="Heading" value={`${Math.round(heading)}°`} />
+        <InfoRow label="Ground speed" value={`${speedMps.toFixed(1)} m/s Â· ${Math.round(speedKnots)} kt`} />
+        <InfoRow label="Heading" value={`${Math.round(heading)}Â°`} />
         <InfoRow label="Coordinates" value={`${track.py.toFixed(5)}, ${track.px.toFixed(5)}`} />
         <InfoRow label="Position uncertainty" value={`${track.uncertainty.toFixed(1)} m`} />
-        <InfoRow label="Ellipse major" value={track.ellipseMajor != null ? `${track.ellipseMajor.toFixed(1)} m` : '—'} />
-        <InfoRow label="Ellipse minor" value={track.ellipseMinor != null ? `${track.ellipseMinor.toFixed(1)} m` : '—'} />
-        <InfoRow label="Last update" value={`${fmtTime(track.lastUpdateMs)} · ${fmtAge(now - track.lastUpdateMs)}`} />
-        <InfoRow label="Sensor sources" value={track.contributingSensors?.join(', ') || '—'} />
+        <InfoRow label="Ellipse major" value={track.ellipseMajor != null ? `${track.ellipseMajor.toFixed(1)} m` : 'â€”'} />
+        <InfoRow label="Ellipse minor" value={track.ellipseMinor != null ? `${track.ellipseMinor.toFixed(1)} m` : 'â€”'} />
+        <InfoRow label="Last update" value={`${fmtTime(track.lastUpdateMs)} Â· ${fmtAge(now - track.lastUpdateMs)}`} />
+        <InfoRow label="Sensor sources" value={track.contributingSensors?.join(', ') || 'â€”'} />
       </div>
 
       <div className="subsection-title">GEOFENCE STATUS</div>
@@ -1053,7 +1149,7 @@ function SensorStatus({ tracks, connected }: { tracks: Array<[string, FusedTrack
           <SummaryStat label="VIRTUAL P99" value={`${BENCHMARK.virtualLatency.p99.toFixed(1)} ms`} />
         </div>
 
-        <div className="snapshot-note">Measured benchmark · not live telemetry</div>
+        <div className="snapshot-note">Measured benchmark Â· not live telemetry</div>
       </div>
     </section>
   )
@@ -1077,7 +1173,7 @@ function EventFeed({ events }: { events: TrackEvent[] }) {
           <span className="mono">{fmtTime(event.timestampMs)}</span>
           <span><EventPill type={event.type} /></span>
           <span className="mono strong">{event.trackId}</span>
-          <span>{event.zoneId} · {event.previousState} → {event.newState}</span>
+          <span>{event.zoneId} Â· {event.previousState} â†’ {event.newState}</span>
         </div>
       ))}
 
@@ -1140,7 +1236,7 @@ function MiniEvent({ event }: { event: TrackEvent }) {
       <div className="mini-event-time mono">{fmtTime(event.timestampMs)}</div>
       <div className="mini-event-copy">
         <strong className={colorClass}>{event.type.replace(/_/g, ' ')}</strong>
-        <span>{event.trackId} · {event.zoneId}</span>
+        <span>{event.trackId} Â· {event.zoneId}</span>
       </div>
     </div>
   )
@@ -1358,12 +1454,12 @@ function headingDeg(vx: number, vy: number) {
 }
 
 function fmtTime(ms: number) {
-  if (!Number.isFinite(ms) || ms <= 0) return '—'
+  if (!Number.isFinite(ms) || ms <= 0) return 'â€”'
   return new Date(ms).toISOString().slice(11, 19) + 'Z'
 }
 
 function fmtAge(ms: number) {
-  if (!Number.isFinite(ms)) return '—'
+  if (!Number.isFinite(ms)) return 'â€”'
   if (ms < 1_000) return `${Math.max(0, ms)} ms ago`
   if (ms < 60_000) return `${(ms / 1_000).toFixed(1)} s ago`
   return `${Math.floor(ms / 60_000)}m ago`
@@ -1390,3 +1486,7 @@ function fmtCompact(value: number) {
 }
 
 ReactDOM.createRoot(document.getElementById('root')!).render(<App />)
+
+
+
+
