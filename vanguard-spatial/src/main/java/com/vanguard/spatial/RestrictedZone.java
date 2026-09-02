@@ -54,6 +54,8 @@ public class RestrictedZone {
 
     public String getZoneId() { return zoneId; }
     public Polygon getPolygon() { return polygon; }
+    public Geometry getWarningBuffer() { return warningBuffer; }
+    public Geometry getAdvisoryBuffer() { return advisoryBuffer; }
 
     /**
      * Create a rectangular restricted zone (convenience for testing).
