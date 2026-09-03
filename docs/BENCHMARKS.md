@@ -76,3 +76,61 @@ The benchmark therefore observed a 63% reduction in positional RMSE relative
 to the raw sensor measurements under the tested simulation.
 
 ---
+
+## Processing Latency
+
+### 200 Targets — Spatial Index Enabled
+
+Three-run median:
+
+| Percentile | Latency |
+|---|---:|
+| p50 | **16.74 ms** |
+| p95 | **23.92 ms** |
+| p99 | **37.72 ms** |
+
+The spatial-index-enabled configuration is treated as the primary operational
+benchmark configuration.
+
+### 200 Targets — Without Spatial Index
+
+Three-run median:
+
+| Percentile | Latency |
+|---|---:|
+| p50 | **16.40 ms** |
+| p95 | **26.12 ms** |
+| p99 | **38.37 ms** |
+
+The benchmark does not show a large or uniform latency advantage from enabling
+the spatial index. Spatial indexing should therefore not be described as a
+general latency optimization based on these measurements.
+
+---
+
+## Throughput Scaling
+
+### Spatial Index Enabled
+
+| Targets | Throughput |
+|---:|---:|
+| 50 | **35,728 reports/s** |
+| 200 | **18,546 reports/s** |
+| 500 | **12,485 reports/s** |
+| 1,000 | **9,771 reports/s** |
+
+### Without Spatial Index
+
+| Targets | Throughput |
+|---:|---:|
+| 50 | **24,400 reports/s** |
+| 200 | **16,402 reports/s** |
+| 500 | **12,132 reports/s** |
+| 1,000 | **11,280 reports/s** |
+
+Spatial indexing improves throughput at several lower target counts in this
+benchmark, but the 1,000-target result regresses relative to the non-indexed
+configuration. No blanket claim that spatial indexing improves throughput at
+all scales is made.
+
+---
