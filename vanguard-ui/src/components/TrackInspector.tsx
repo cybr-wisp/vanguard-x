@@ -24,7 +24,7 @@ export const TrackInspector: React.FC<TrackInspectorProps> = ({ track, events, o
       position: 'absolute', top: 60, right: 12, width: 280,
       background: 'rgba(10, 22, 40, 0.95)', border: '1px solid #335',
       borderRadius: 6, padding: 16, color: '#ccc',
-      fontFamily: 'monospace', fontSize: 12,
+      fontFamily: 'IBM Plex Mono, Cascadia Mono, Consolas, monospace', fontSize: 12,
     }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12 }}>
         <span style={{ color: '#4af', fontWeight: 'bold' }}>{track.trackId}</span>

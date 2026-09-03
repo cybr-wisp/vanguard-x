@@ -39,7 +39,7 @@ const panelStyle: React.CSSProperties = {
   position: 'absolute', bottom: 12, left: 12,
   background: 'rgba(10, 22, 40, 0.92)', border: '1px solid #224',
   borderRadius: 6, padding: '10px 14px',
-  fontFamily: 'monospace', fontSize: 11, color: '#aaa',
+  fontFamily: 'IBM Plex Mono, Cascadia Mono, Consolas, monospace', fontSize: 11, color: '#aaa',
   minWidth: 180,
 };
 

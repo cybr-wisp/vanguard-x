@@ -13,7 +13,7 @@ export const SensorLayer: React.FC<SensorLayerProps> = ({ sensors }) => (
           transform={`rotate(45 ${s.x} ${s.y})`}
           fill="none" stroke="#4f4" strokeWidth={1.5} opacity={0.7}
         />
-        <text x={s.x + 10} y={s.y + 3} fill="#4f4" fontSize={8} fontFamily="monospace">
+        <text x={s.x + 10} y={s.y + 3} fill="#4f4" fontSize={8} fontFamily="IBM Plex Mono, Cascadia Mono, Consolas, monospace">
           {s.sensorId}
         </text>
       </g>

@@ -22,7 +22,7 @@ export const GeofenceLayer: React.FC<GeofenceLayerProps> = ({ zones }) => (
             <text
               x={zone.polygon[0][0]}
               y={zone.polygon[0][1] - 10}
-              fill="#f66" fontSize={10} fontFamily="monospace"
+              fill="#f66" fontSize={10} fontFamily="IBM Plex Mono, Cascadia Mono, Consolas, monospace"
             >
               {zone.zoneId}
             </text>

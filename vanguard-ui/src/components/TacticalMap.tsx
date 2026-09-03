@@ -70,7 +70,7 @@ export const TacticalMap: React.FC<TacticalMapProps> = ({ sensors, zones }) => {
         position: 'absolute', top: 12, left: 12,
         padding: '4px 12px', borderRadius: 4,
         background: connected ? '#1a7a3a' : '#7a1a1a',
-        color: '#fff', fontSize: 12, fontFamily: 'monospace'
+        color: '#fff', fontSize: 12, fontFamily: 'IBM Plex Mono, Cascadia Mono, Consolas, monospace'
       }}>
         {connected ? 'LIVE' : 'DISCONNECTED'}
       </div>
@@ -78,7 +78,7 @@ export const TacticalMap: React.FC<TacticalMapProps> = ({ sensors, zones }) => {
       {/* Visibility toggles */}
       <div style={{
         position: 'absolute', top: 12, right: 12,
-        display: 'flex', gap: 8, fontFamily: 'monospace', fontSize: 12
+        display: 'flex', gap: 8, fontFamily: 'IBM Plex Mono, Cascadia Mono, Consolas, monospace', fontSize: 12
       }}>
         <label style={{ color: '#aaa' }}>
           <input type="checkbox" checked={showRaw} onChange={e => setShowRaw(e.target.checked)} />

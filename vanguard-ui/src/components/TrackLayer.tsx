@@ -52,7 +52,7 @@ export const TrackLayer: React.FC<TrackLayerProps> = ({ tracks, onSelect }) => {
             {/* Track ID label */}
             <text
               x={track.px + 8} y={track.py - 6}
-              fill={color} fontSize={9} fontFamily="monospace"
+              fill={color} fontSize={9} fontFamily="IBM Plex Mono, Cascadia Mono, Consolas, monospace"
               opacity={0.8}
             >
               {track.trackId.replace('TRK-', '')}

@@ -36,7 +36,7 @@ export const ChaosPanel: React.FC = () => {
         style={{
           position: 'absolute', bottom: 12, right: 12,
           background: '#2a1a1a', border: '1px solid #633', borderRadius: 4,
-          color: '#f66', fontFamily: 'monospace', fontSize: 11,
+          color: '#f66', fontFamily: 'IBM Plex Mono, Cascadia Mono, Consolas, monospace', fontSize: 11,
           padding: '6px 12px', cursor: 'pointer',
         }}
       >
@@ -49,7 +49,7 @@ export const ChaosPanel: React.FC = () => {
     <div style={{
       position: 'absolute', bottom: 12, right: 12, width: 240,
       background: 'rgba(30, 15, 15, 0.95)', border: '1px solid #633',
-      borderRadius: 6, padding: 14, fontFamily: 'monospace', fontSize: 11,
+      borderRadius: 6, padding: 14, fontFamily: 'IBM Plex Mono, Cascadia Mono, Consolas, monospace', fontSize: 11,
       color: '#ccc',
     }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 10 }}>
@@ -107,5 +107,5 @@ export const ChaosPanel: React.FC = () => {
 const chaosBtn: React.CSSProperties = {
   width: '100%', marginBottom: 4, padding: '5px 0',
   background: 'none', border: '1px solid #633', borderRadius: 3,
-  color: '#f88', cursor: 'pointer', fontFamily: 'monospace', fontSize: 10,
+  color: '#f88', cursor: 'pointer', fontFamily: 'IBM Plex Mono, Cascadia Mono, Consolas, monospace', fontSize: 10,
 };
