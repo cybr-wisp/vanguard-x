@@ -34,15 +34,10 @@ public class DataAssociator {
     }
 
     public DataAssociator(MahalanobisGate gate) {
-        this(gate, 300.0);
+        this(gate, 2_000.0);
     }
 
-    public DataAssociator() {
-        this(
-                new MahalanobisGate(),
-                300.0
-        );
-    }
+    public DataAssociator() { this(new MahalanobisGate(), 2_000.0); }
 
     /**
      * Result of an association attempt for one observation.
@@ -375,8 +370,7 @@ public class DataAssociator {
                                 innovation[1]
                         );
 
-                if (gate.isInsideGate(
-                        squaredDistance)) {
+                if (gate.isInsideGate(squaredDistance)) {
 
                     costs[
                             observationIndex

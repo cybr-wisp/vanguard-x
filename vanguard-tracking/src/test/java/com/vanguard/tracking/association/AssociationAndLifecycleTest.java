@@ -307,6 +307,598 @@ class AssociationAndLifecycleTest {
                     "Constrained observation must retain its only valid track"
             );
         }
+
+        @Test
+        @DisplayName("Two-second dropout preserves canonical track ID on reacquisition")
+        void twoSecondDropoutPreservesTrackIdentity() {
+            TrackManager manager =
+                    new TrackManager(
+                            new DataAssociator(),
+                            MOTION,
+                            3,
+                            3,
+                            45,
+                            10_000,
+                            62_500
+                    );
+
+            double initialX = 13_500.0;
+            double initialY = 1_000.0;
+            double vx = -190.0;
+            double vy = 20.0;
+
+            long timestampMs = 1_000L;
+            long cadenceMs = 70L;
+
+            // Establish one confirmed canonical track.
+            for (int i = 0; i < 50; i++) {
+                double elapsedSeconds =
+                        (timestampMs - 1_000L) / 1000.0;
+
+                SimpleMatrix truthState =
+                        new SimpleMatrix(
+                                new double[][]{
+                                        {initialX + vx * elapsedSeconds},
+                                        {initialY + vy * elapsedSeconds},
+                                        {vx},
+                                        {vy}
+                                }
+                        );
+
+                SimpleMatrix measurement =
+                        SENSOR.h(truthState);
+
+                manager.processObservations(
+                        List.of(measurement),
+                        SENSOR,
+                        "S1",
+                        timestampMs
+                );
+
+                timestampMs += cadenceMs;
+            }
+
+            assertEquals(
+                    1,
+                    manager.getAliveCount(),
+                    "Exactly one canonical track should exist before dropout"
+            );
+
+            Track originalTrack =
+                    manager.getAliveTracks()
+                            .iterator()
+                            .next();
+
+            String originalTrackId =
+                    originalTrack.getTrackId();
+
+            assertEquals(
+                    TrackState.CONFIRMED,
+                    originalTrack.getState(),
+                    "Track must be confirmed before dropout"
+            );
+
+            double uncertaintyBeforeDropout =
+                    originalTrack.getPositionUncertainty();
+
+            // 29 x 70 ms = 2030 ms of missing observations.
+            for (int i = 0; i < 29; i++) {
+                manager.processObservations(
+                        List.of(),
+                        SENSOR,
+                        "S1",
+                        timestampMs
+                );
+
+                timestampMs += cadenceMs;
+            }
+
+            // Advance once to finalize the previous empty lifecycle cycle.
+            manager.processObservations(
+                    List.of(),
+                    SENSOR,
+                    "S1",
+                    timestampMs
+            );
+
+            timestampMs += cadenceMs;
+
+            Track coastingTrack =
+                    manager.getTrack(originalTrackId)
+                            .orElseThrow();
+
+            assertEquals(
+                    TrackState.COASTING,
+                    coastingTrack.getState(),
+                    "Canonical track should coast during the blackout"
+            );
+
+            assertTrue(
+                    coastingTrack.getPositionUncertainty()
+                            > uncertaintyBeforeDropout,
+                    "Position uncertainty should grow while coasting"
+            );
+
+            assertEquals(
+                    1,
+                    manager.getAliveCount(),
+                    "Blackout must not create another live track"
+            );
+
+            // Truth continues moving while observations are absent.
+            double elapsedSeconds =
+                    (timestampMs - 1_000L) / 1000.0;
+
+            SimpleMatrix resumedTruthState =
+                    new SimpleMatrix(
+                            new double[][]{
+                                    {initialX + vx * elapsedSeconds},
+                                    {initialY + vy * elapsedSeconds},
+                                    {vx},
+                                    {vy}
+                            }
+                    );
+
+            SimpleMatrix resumedMeasurement =
+                    SENSOR.h(resumedTruthState);
+
+            long recoveryStartNs =
+                    System.nanoTime();
+
+            manager.processObservations(
+                    List.of(resumedMeasurement),
+                    SENSOR,
+                    "S1",
+                    timestampMs
+            );
+
+            long recoveryProcessingNs =
+                    System.nanoTime() - recoveryStartNs;
+
+            Track reacquiredTrack =
+                    manager.getTrack(originalTrackId)
+                            .orElseThrow();
+
+            assertEquals(
+                    TrackState.CONFIRMED,
+                    reacquiredTrack.getState(),
+                    "Same canonical track must return to CONFIRMED"
+            );
+
+            assertEquals(
+                    originalTrackId,
+                    reacquiredTrack.getTrackId(),
+                    "Track ID must remain unchanged"
+            );
+
+            assertEquals(
+                    1,
+                    manager.getAliveCount(),
+                    "Reacquisition must not leave duplicate live tracks"
+            );
+
+            assertEquals(
+                    1,
+                    manager.getTotalCreated(),
+                    "Reacquisition must not create a replacement track"
+            );
+
+            double positionErrorMeters =
+                    Math.hypot(
+                            reacquiredTrack.getPx()
+                                    - resumedTruthState.get(0),
+                            reacquiredTrack.getPy()
+                                    - resumedTruthState.get(1)
+                    );
+
+            System.out.printf(
+                    "%nREACQUISITION METRICS%n" +
+                            "trackId=%s%n" +
+                            "blackoutMs=%d%n" +
+                            "recoveryProcessingMs=%.3f%n" +
+                            "positionErrorM=%.3f%n" +
+                            "uncertaintyBefore=%.3f%n" +
+                            "uncertaintyAfter=%.3f%n" +
+                            "aliveTracks=%d%n" +
+                            "totalCreated=%d%n",
+                    originalTrackId,
+                    29 * cadenceMs,
+                    recoveryProcessingNs / 1_000_000.0,
+                    positionErrorMeters,
+                    uncertaintyBeforeDropout,
+                    reacquiredTrack.getPositionUncertainty(),
+                    manager.getAliveCount(),
+                    manager.getTotalCreated()
+            );
+        }
+
+        @Test
+        @DisplayName("Ten-target scenario preserves canonical track through two-second dropout")
+        void multiTargetDropoutPreservesCanonicalTrackIdentity() {
+            TrackManager manager =
+                    new TrackManager(
+                            new DataAssociator(),
+                            MOTION,
+                            3,
+                            3,
+                            45,
+                            10_000,
+                            62_500
+                    );
+
+            double[][] targets = {
+                    {-15_000.0,  2_000.0,  205.0,    8.0},
+                    { 14_000.0,  6_000.0, -195.0,  -18.0},
+                    { -7_000.0, -8_500.0,   55.0,  190.0},
+                    {-12_000.0,  8_000.0,  175.0,  -70.0},
+                    { 11_500.0, -7_500.0, -165.0,  135.0},
+                    { -2_500.0, -9_000.0,   25.0,  185.0},
+                    { 13_500.0,  1_000.0, -190.0,   20.0},
+                    {-16_000.0, -5_000.0,  200.0,   75.0},
+                    {  6_000.0,  9_500.0, -110.0, -175.0},
+                    { -4_000.0, 10_000.0,   95.0, -170.0}
+            };
+
+            final int dropoutTargetIndex = 6;
+            final long startTimestampMs = 1_000L;
+            final long cadenceMs = 70L;
+
+            long timestampMs = startTimestampMs;
+
+            // Establish ten canonical tracks.
+            for (int step = 0; step < 50; step++) {
+                double elapsedSeconds =
+                        (timestampMs - startTimestampMs) / 1000.0;
+
+                java.util.ArrayList<SimpleMatrix> observations =
+                        new java.util.ArrayList<>();
+
+                for (double[] target : targets) {
+                    SimpleMatrix truthState =
+                            new SimpleMatrix(
+                                    new double[][]{
+                                            {
+                                                    target[0]
+                                                            + target[2]
+                                                            * elapsedSeconds
+                                            },
+                                            {
+                                                    target[1]
+                                                            + target[3]
+                                                            * elapsedSeconds
+                                            },
+                                            {target[2]},
+                                            {target[3]}
+                                    }
+                            );
+
+                    observations.add(SENSOR.h(truthState));
+                }
+
+                manager.processObservations(
+                        observations,
+                        SENSOR,
+                        "S1",
+                        timestampMs
+                );
+
+                timestampMs += cadenceMs;
+            }
+
+            assertEquals(
+                    10,
+                    manager.getAliveCount(),
+                    "Exactly ten live tracks should exist before dropout"
+            );
+
+            assertEquals(
+                    10,
+                    manager.getConfirmedCount(),
+                    "All ten tracks should be confirmed before dropout"
+            );
+
+            assertEquals(
+                    10,
+                    manager.getTotalCreated(),
+                    "Establishment must not create duplicate tracks"
+            );
+
+            double[] dropoutTarget =
+                    targets[dropoutTargetIndex];
+
+            double preDropoutElapsedSeconds =
+                    ((timestampMs - cadenceMs) - startTimestampMs)
+                            / 1000.0;
+
+            double dropoutTruthX =
+                    dropoutTarget[0]
+                            + dropoutTarget[2]
+                            * preDropoutElapsedSeconds;
+
+            double dropoutTruthY =
+                    dropoutTarget[1]
+                            + dropoutTarget[3]
+                            * preDropoutElapsedSeconds;
+
+            Track canonicalTrack = null;
+            double canonicalDistance =
+                    Double.POSITIVE_INFINITY;
+
+            for (Track track : manager.getAliveTracks()) {
+                double distance =
+                        Math.hypot(
+                                track.getPx() - dropoutTruthX,
+                                track.getPy() - dropoutTruthY
+                        );
+
+                if (distance < canonicalDistance) {
+                    canonicalDistance = distance;
+                    canonicalTrack = track;
+                }
+            }
+
+            assertNotNull(
+                    canonicalTrack,
+                    "TGT-07 canonical track must exist"
+            );
+
+            String canonicalTrackId =
+                    canonicalTrack.getTrackId();
+
+            assertEquals(
+                    TrackState.CONFIRMED,
+                    canonicalTrack.getState(),
+                    "TGT-07 must be confirmed before dropout"
+            );
+
+            // Suppress TGT-07 while the other nine continue updating.
+            for (int blackoutStep = 0;
+                 blackoutStep < 29;
+                 blackoutStep++) {
+
+                double elapsedSeconds =
+                        (timestampMs - startTimestampMs) / 1000.0;
+
+                java.util.ArrayList<SimpleMatrix> observations =
+                        new java.util.ArrayList<>();
+
+                for (int targetIndex = 0;
+                     targetIndex < targets.length;
+                     targetIndex++) {
+
+                    if (targetIndex == dropoutTargetIndex) {
+                        continue;
+                    }
+
+                    double[] target =
+                            targets[targetIndex];
+
+                    SimpleMatrix truthState =
+                            new SimpleMatrix(
+                                    new double[][]{
+                                            {
+                                                    target[0]
+                                                            + target[2]
+                                                            * elapsedSeconds
+                                            },
+                                            {
+                                                    target[1]
+                                                            + target[3]
+                                                            * elapsedSeconds
+                                            },
+                                            {target[2]},
+                                            {target[3]}
+                                    }
+                            );
+
+                    observations.add(
+                            SENSOR.h(truthState)
+                    );
+                }
+
+                manager.processObservations(
+                        observations,
+                        SENSOR,
+                        "S1",
+                        timestampMs
+                );
+
+                timestampMs += cadenceMs;
+            }
+
+            // Finalize the previous blackout cycle deterministically.
+            {
+                double elapsedSeconds =
+                        (timestampMs - startTimestampMs) / 1000.0;
+
+                java.util.ArrayList<SimpleMatrix> observations =
+                        new java.util.ArrayList<>();
+
+                for (int targetIndex = 0;
+                     targetIndex < targets.length;
+                     targetIndex++) {
+
+                    if (targetIndex == dropoutTargetIndex) {
+                        continue;
+                    }
+
+                    double[] target =
+                            targets[targetIndex];
+
+                    SimpleMatrix truthState =
+                            new SimpleMatrix(
+                                    new double[][]{
+                                            {
+                                                    target[0]
+                                                            + target[2]
+                                                            * elapsedSeconds
+                                            },
+                                            {
+                                                    target[1]
+                                                            + target[3]
+                                                            * elapsedSeconds
+                                            },
+                                            {target[2]},
+                                            {target[3]}
+                                    }
+                            );
+
+                    observations.add(
+                            SENSOR.h(truthState)
+                    );
+                }
+
+                manager.processObservations(
+                        observations,
+                        SENSOR,
+                        "S1",
+                        timestampMs
+                );
+            }
+
+            timestampMs += cadenceMs;
+
+            Track coastingTrack =
+                    manager.getTrack(canonicalTrackId)
+                            .orElseThrow();
+
+            assertEquals(
+                    TrackState.COASTING,
+                    coastingTrack.getState(),
+                    "TGT-07 canonical track should coast during dropout"
+            );
+
+            assertEquals(
+                    10,
+                    manager.getAliveCount(),
+                    "Dropout must preserve ten live tracks"
+            );
+
+            assertEquals(
+                    10,
+                    manager.getTotalCreated(),
+                    "Dropout must not create replacement tracks"
+            );
+
+            double recoveryElapsedSeconds =
+                    (timestampMs - startTimestampMs) / 1000.0;
+
+            java.util.ArrayList<SimpleMatrix> recoveryObservations =
+                    new java.util.ArrayList<>();
+
+            SimpleMatrix dropoutTargetRecoveryTruth =
+                    null;
+
+            for (int targetIndex = 0;
+                 targetIndex < targets.length;
+                 targetIndex++) {
+
+                double[] target =
+                        targets[targetIndex];
+
+                SimpleMatrix truthState =
+                        new SimpleMatrix(
+                                new double[][]{
+                                        {
+                                                target[0]
+                                                        + target[2]
+                                                        * recoveryElapsedSeconds
+                                        },
+                                        {
+                                                target[1]
+                                                        + target[3]
+                                                        * recoveryElapsedSeconds
+                                        },
+                                        {target[2]},
+                                        {target[3]}
+                                }
+                        );
+
+                recoveryObservations.add(
+                        SENSOR.h(truthState)
+                );
+
+                if (targetIndex == dropoutTargetIndex) {
+                    dropoutTargetRecoveryTruth =
+                            truthState;
+                }
+            }
+
+            assertNotNull(dropoutTargetRecoveryTruth);
+
+            long recoveryStartNs =
+                    System.nanoTime();
+
+            manager.processObservations(
+                    recoveryObservations,
+                    SENSOR,
+                    "S1",
+                    timestampMs
+            );
+
+            long recoveryProcessingNs =
+                    System.nanoTime() - recoveryStartNs;
+
+            Track reacquiredTrack =
+                    manager.getTrack(canonicalTrackId)
+                            .orElseThrow();
+
+            assertEquals(
+                    TrackState.CONFIRMED,
+                    reacquiredTrack.getState(),
+                    "TGT-07 must reacquire into its original canonical track"
+            );
+
+            assertEquals(
+                    canonicalTrackId,
+                    reacquiredTrack.getTrackId(),
+                    "TGT-07 track ID must remain unchanged"
+            );
+
+            assertEquals(
+                    10,
+                    manager.getAliveCount(),
+                    "Reacquisition must leave exactly ten live tracks"
+            );
+
+            assertEquals(
+                    10,
+                    manager.getConfirmedCount(),
+                    "All ten tracks should be confirmed after reacquisition"
+            );
+
+            assertEquals(
+                    10,
+                    manager.getTotalCreated(),
+                    "Reacquisition must not create a replacement track"
+            );
+
+            double positionErrorMeters =
+                    Math.hypot(
+                            reacquiredTrack.getPx()
+                                    - dropoutTargetRecoveryTruth.get(0),
+                            reacquiredTrack.getPy()
+                                    - dropoutTargetRecoveryTruth.get(1)
+                    );
+
+            System.out.printf(
+                    "%nMULTI-TARGET REACQUISITION METRICS%n" +
+                            "canonicalTrackId=%s%n" +
+                            "blackoutMs=%d%n" +
+                            "recoveryProcessingMs=%.3f%n" +
+                            "positionErrorM=%.3f%n" +
+                            "aliveTracks=%d%n" +
+                            "confirmedTracks=%d%n" +
+                            "totalCreated=%d%n",
+                    canonicalTrackId,
+                    29 * cadenceMs,
+                    recoveryProcessingNs / 1_000_000.0,
+                    positionErrorMeters,
+                    manager.getAliveCount(),
+                    manager.getConfirmedCount(),
+                    manager.getTotalCreated()
+            );
+        }
         @Test
         @DisplayName("New track does not immediately receive a miss")
         void newTrackDoesNotImmediatelyMiss() {
@@ -333,6 +925,8 @@ class AssociationAndLifecycleTest {
                     "S1",
                     1000
             );
+
+            manager.processObservations(List.of(), SENSOR, "S1", 1001);
 
             Track track =
                     manager.getAllTracks()
@@ -377,16 +971,29 @@ class AssociationAndLifecycleTest {
                     1000
             );
 
-            Track track =
-                    manager.getAllTracks()
-                            .iterator()
-                            .next();
+            manager.processObservations(
+                    List.of(z),
+                    SENSOR,
+                    "S2",
+                    1000
+            );
 
+            // Advancing to 2000 finalizes the corroborated 1000 birth.
             manager.processObservations(
                     List.of(),
                     SENSOR,
                     "S1",
                     2000
+            );
+
+            Track track =
+                    manager.getAllTracks()
+                            .iterator()
+                            .next();
+
+            assertEquals(
+                    0,
+                    track.getConsecutiveMisses()
             );
 
             manager.processObservations(
@@ -403,10 +1010,7 @@ class AssociationAndLifecycleTest {
                     2000
             );
 
-            /*
-             * Timestamp 2000 remains one open observation cycle.
-             * Moving to 3000 finalizes it exactly once.
-             */
+            // Advancing to 3000 finalizes timestamp 2000 exactly once.
             manager.processObservations(
                     List.of(),
                     SENSOR,
@@ -418,8 +1022,7 @@ class AssociationAndLifecycleTest {
                     1,
                     track.getConsecutiveMisses()
             );
-        }
-    }
+        }    }
     // ================================================================
     // Day 9: Track lifecycle
     // ================================================================

@@ -119,6 +119,14 @@ class DuplicateSuppressionTest {
                 4_000
         );
 
+        // Advance the timestamp so the deferred tentative birth is finalized.
+        manager.processObservations(
+                List.of(),
+                SENSOR,
+                "S1",
+                4_001
+        );
+
         assertEquals(
                 2,
                 manager.getAliveCount(),

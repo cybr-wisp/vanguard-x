@@ -55,6 +55,43 @@ public class TrackManager {
      */
     private long activeObservationMs = Long.MIN_VALUE;
     private final Set<String> updatedInActiveCycle = new HashSet<>();
+    private final Set<String> sensorsInActiveCycle = new HashSet<>();
+
+    /*
+     * Association for every sensor batch in one timestamp must use the same
+     * predicted prior. Canonical EKFs may be updated immediately after a match,
+     * but those posterior updates must not change the gate seen by later
+     * sensors reporting the same observation time.
+     */
+    private List<Candidate> associationCandidates = List.of();
+
+    /*
+     * Track births are deferred until the observation timestamp closes.
+     *
+     * Each sensor still performs normal global one-to-one association against
+     * the current canonical tracks. Any measurements that remain unassociated
+     * are held here temporarily so later sensors at the same timestamp get a
+     * chance to explain them before new canonical hypotheses are created.
+     */
+    private record PendingBirthBatch(
+            List<SimpleMatrix> measurements,
+            MeasurementModel sensorModel,
+            String sensorId,
+            long observationMs,
+            Set<String> unavailableTrackIds
+    ) {}
+
+    private record ProvisionalBirth(
+            String provisionalId,
+            SimpleMatrix measurement,
+            MeasurementModel sensorModel,
+            String sensorId,
+            long observationMs,
+            ExtendedKalmanFilter filter
+    ) {}
+
+    private final List<PendingBirthBatch> pendingBirthBatches =
+            new ArrayList<>();
 
     public TrackManager(DataAssociator associator, MotionModel motionModel,
                         int hitsToConfirm, int missesToCoast, int missesToDrop,
@@ -95,44 +132,64 @@ public class TrackManager {
          */
         beginObservationCycleIfNeeded(observationMs);
 
-        // 1. Build candidate list from predicted alive tracks.
-        List<Candidate> candidates = new ArrayList<>();
-        for (Track t : tracks.values()) {
-            if (t.isAlive()) {
-                candidates.add(new Candidate(t.getTrackId(), t.getEkf()));
-            }
-        }
+        // 1. Use the frozen predicted prior shared by every sensor at this timestamp.
+        sensorsInActiveCycle.add(sensorId);
+        List<Candidate> candidates = associationCandidates;
 
         // 2. Associate
         Map<Integer, AssociationResult> results =
                 associator.associateBatch(measurements, sensorModel, candidates);
 
 
+        List<SimpleMatrix> unassociatedMeasurements =
+                new ArrayList<>();
+
+        Set<String> unavailableTrackIds =
+                new HashSet<>();
+
         for (var entry : results.entrySet()) {
             int obsIdx = entry.getKey();
             AssociationResult result = entry.getValue();
 
             if (result instanceof AssociationResult.Associated a) {
-                // Update the associated track
+                // Update the associated track immediately.
                 Track track = tracks.get(a.trackId());
                 if (track != null) {
-                    track.update(measurements.get(obsIdx), sensorModel, sensorId, observationMs);
+                    track.update(
+                            measurements.get(obsIdx),
+                            sensorModel,
+                            sensorId,
+                            observationMs
+                    );
+
                     updatedInActiveCycle.add(a.trackId());
+                    unavailableTrackIds.add(a.trackId());
                 }
             } else {
-                // Unassociated: create a new tentative track.
-                // The creating observation counts as an update in this cycle,
-                // so the new track must not immediately receive a miss.
-                String newTrackId =
-                        initializeTrack(
-                                measurements.get(obsIdx),
-                                sensorModel,
-                                sensorId,
-                                observationMs
-                        );
-
-                updatedInActiveCycle.add(newTrackId);
+                /*
+                 * Do NOT create a canonical track yet.
+                 *
+                 * More sensors may still report this same physical target at
+                 * this same observation timestamp. Defer birth until the
+                 * timestamp closes, then reconcile these measurements against
+                 * all tracks created or updated during the full epoch.
+                 */
+                unassociatedMeasurements.add(
+                        measurements.get(obsIdx)
+                );
             }
+        }
+
+        if (!unassociatedMeasurements.isEmpty()) {
+            pendingBirthBatches.add(
+                    new PendingBirthBatch(
+                            List.copyOf(unassociatedMeasurements),
+                            sensorModel,
+                            sensorId,
+                            observationMs,
+                            Set.copyOf(unavailableTrackIds)
+                    )
+            );
         }
 
         /*
@@ -163,12 +220,48 @@ public class TrackManager {
 
         activeObservationMs = observationMs;
         updatedInActiveCycle.clear();
+        sensorsInActiveCycle.clear();
 
         for (Track track : tracks.values()) {
             if (track.isAlive()) {
                 track.predictTo(observationMs);
             }
         }
+
+        associationCandidates = snapshotAliveCandidates();
+    }
+
+    /**
+     * Capture immutable EKF snapshots for association at the active timestamp.
+     * Later same-timestamp sensor updates modify only canonical tracks, never
+     * these association priors.
+     */
+    private List<Candidate> snapshotAliveCandidates() {
+        List<Candidate> snapshots = new ArrayList<>();
+
+        for (Track track : tracks.values()) {
+            if (track.isAlive()) {
+                snapshots.add(snapshotCandidate(track));
+            }
+        }
+
+        return List.copyOf(snapshots);
+    }
+
+    private Candidate snapshotCandidate(Track track) {
+        ExtendedKalmanFilter source = track.getEkf();
+
+        ExtendedKalmanFilter snapshot =
+                new ExtendedKalmanFilter(
+                        source.getState(),
+                        source.getCovariance(),
+                        motionModel
+                );
+
+        return new Candidate(
+                track.getTrackId(),
+                snapshot
+        );
     }
 
     /**
@@ -176,6 +269,16 @@ public class TrackManager {
      * observation timestamp.
      */
     private void finalizeActiveObservationCycle() {
+        /*
+         * Resolve deferred births before lifecycle misses.
+         *
+         * This aligns track creation with the same observation-cycle boundary
+         * already used for miss accounting. It prevents one sensor from
+         * creating a duplicate canonical hypothesis before the other sensors
+         * at the same timestamp have been considered.
+         */
+        resolvePendingBirthBatches();
+
         for (Track track : tracks.values()) {
             if (track.isAlive()
                     && !updatedInActiveCycle.contains(track.getTrackId())) {
@@ -185,6 +288,266 @@ public class TrackManager {
         }
 
         updatedInActiveCycle.clear();
+    }
+
+    /**
+     * Reconcile measurements that were unassociated during their original
+     * sensor batch after all same-timestamp sensor batches have arrived.
+     *
+     * Batches are resolved in deterministic arrival order. Within each batch,
+     * DataAssociator still performs a global one-to-one assignment. Tracks
+     * that were already consumed by another observation from the same original
+     * sensor batch are excluded so same-sensor one-to-one semantics are
+     * preserved.
+     */
+    private void resolvePendingBirthBatches() {
+        if (pendingBirthBatches.isEmpty()) {
+            return;
+        }
+
+        /*
+         * New hypotheses created while closing this timestamp get their own
+         * frozen association snapshots. This lets later sensors at the same
+         * timestamp associate to those newborn tracks without being gated
+         * against posteriors already modified by earlier sensors.
+         */
+        List<Candidate> birthAssociationCandidates =
+                new ArrayList<>();
+
+        List<ProvisionalBirth> provisionalBirths =
+                new ArrayList<>();
+        long provisionalCounter = 0L;
+
+        for (PendingBirthBatch pending : pendingBirthBatches) {
+            List<Candidate> candidates =
+                    new ArrayList<>();
+
+            for (Candidate candidate : associationCandidates) {
+                Track canonical =
+                        tracks.get(candidate.trackId());
+
+                if (canonical != null
+                        && canonical.isAlive()
+                        && !pending.unavailableTrackIds()
+                                .contains(candidate.trackId())) {
+
+                    candidates.add(candidate);
+                }
+            }
+
+            for (Candidate candidate : birthAssociationCandidates) {
+                Track canonical =
+                        tracks.get(candidate.trackId());
+
+                if (canonical != null
+                        && canonical.isAlive()
+                        && !pending.unavailableTrackIds()
+                                .contains(candidate.trackId())) {
+
+                    candidates.add(candidate);
+                }
+            }
+
+            Map<Integer, AssociationResult> results =
+                    associator.associateBatch(
+                            pending.measurements(),
+                            pending.sensorModel(),
+                            candidates
+                    );
+
+            for (var entry : results.entrySet()) {
+                int obsIdx = entry.getKey();
+                AssociationResult result = entry.getValue();
+
+                if (result instanceof AssociationResult.Associated a) {
+                    Track track =
+                            tracks.get(a.trackId());
+
+                    if (track != null && track.isAlive()) {
+                        track.update(
+                                pending.measurements().get(obsIdx),
+                                pending.sensorModel(),
+                                pending.sensorId(),
+                                pending.observationMs()
+                        );
+
+                        updatedInActiveCycle.add(
+                                a.trackId()
+                        );
+                    }
+
+                } else {
+                    SimpleMatrix measurement =
+                            pending.measurements().get(obsIdx);
+
+                    if (sensorsInActiveCycle.size() <= 1) {
+                        String newTrackId =
+                                initializeTrack(
+                                        measurement,
+                                        pending.sensorModel(),
+                                        pending.sensorId(),
+                                        pending.observationMs()
+                                );
+
+                        updatedInActiveCycle.add(newTrackId);
+
+                        Track newTrack = tracks.get(newTrackId);
+                        if (newTrack != null) {
+                            birthAssociationCandidates.add(
+                                    snapshotCandidate(newTrack)
+                            );
+                        }
+                        continue;
+                    }
+
+                    List<Candidate> provisionalCandidates =
+                            new ArrayList<>();
+
+                    for (ProvisionalBirth provisional : provisionalBirths) {
+                        if (!provisional.sensorId().equals(pending.sensorId())) {
+                            provisionalCandidates.add(
+                                    new Candidate(
+                                            provisional.provisionalId(),
+                                            provisional.filter()
+                                    )
+                            );
+                        }
+                    }
+
+                    AssociationResult provisionalMatch =
+                            associator.associate(
+                                    measurement,
+                                    pending.sensorModel(),
+                                    provisionalCandidates
+                            );
+
+                    if (provisionalMatch instanceof AssociationResult.Associated a) {
+                        ProvisionalBirth seed =
+                                provisionalBirths.stream()
+                                        .filter(p -> p.provisionalId().equals(a.trackId()))
+                                        .findFirst()
+                                        .orElseThrow();
+
+                        String newTrackId =
+                                initializeTrack(
+                                        seed.measurement(),
+                                        seed.sensorModel(),
+                                        seed.sensorId(),
+                                        seed.observationMs()
+                                );
+
+                        Track newTrack = tracks.get(newTrackId);
+                        if (newTrack != null) {
+                            newTrack.update(
+                                    measurement,
+                                    pending.sensorModel(),
+                                    pending.sensorId(),
+                                    pending.observationMs()
+                            );
+                            updatedInActiveCycle.add(newTrackId);
+                            birthAssociationCandidates.add(snapshotCandidate(newTrack));
+                        }
+
+                        provisionalBirths.remove(seed);
+                    } else {
+                        String provisionalId =
+                                "BIRTH-%06d".formatted(++provisionalCounter);
+
+                        provisionalBirths.add(
+                                new ProvisionalBirth(
+                                        provisionalId,
+                                        measurement,
+                                        pending.sensorModel(),
+                                        pending.sensorId(),
+                                        pending.observationMs(),
+                                        createInitialFilter(
+                                                measurement,
+                                                pending.sensorModel()
+                                        )
+                                )
+                        );
+                    }
+                }
+            }
+        }
+
+        pendingBirthBatches.clear();
+    }
+
+    private ExtendedKalmanFilter createInitialFilter(
+            SimpleMatrix measurement,
+            MeasurementModel sensorModel) {
+
+        double range = measurement.get(0);
+        double bearing = measurement.get(1);
+        double cos = Math.cos(bearing);
+        double sin = Math.sin(bearing);
+
+        double px =
+                sensorModel.getSx() +
+                        range * cos;
+
+        double py =
+                sensorModel.getSy() +
+                        range * sin;
+
+        SimpleMatrix x0 =
+                new SimpleMatrix(
+                        new double[][]{
+                                {px},
+                                {py},
+                                {0},
+                                {0}
+                        }
+                );
+
+        SimpleMatrix measurementNoise =
+                sensorModel.noiseCovariance();
+
+        double rangeVariance =
+                measurementNoise.get(0, 0);
+
+        double bearingVariance =
+                measurementNoise.get(1, 1);
+
+        double rangeSquared =
+                range * range;
+
+        double varX =
+                cos * cos * rangeVariance +
+                        rangeSquared *
+                                sin * sin *
+                                bearingVariance;
+
+        double varY =
+                sin * sin * rangeVariance +
+                        rangeSquared *
+                                cos * cos *
+                                bearingVariance;
+
+        double covXY =
+                sin * cos *
+                        (
+                                rangeVariance -
+                                        rangeSquared *
+                                                bearingVariance
+                        );
+
+        SimpleMatrix P0 =
+                new SimpleMatrix(4, 4);
+
+        P0.set(0, 0, varX + initialPositionVar);
+        P0.set(1, 1, varY + initialPositionVar);
+        P0.set(0, 1, covXY);
+        P0.set(1, 0, covXY);
+        P0.set(2, 2, initialVelocityVar);
+        P0.set(3, 3, initialVelocityVar);
+
+        return new ExtendedKalmanFilter(
+                x0,
+                P0,
+                motionModel
+        );
     }
 
     /**

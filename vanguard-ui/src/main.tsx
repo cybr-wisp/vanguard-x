@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useMemo, useRef, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import ReactDOM from 'react-dom/client'
 import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
@@ -73,6 +73,7 @@ type Tab = 'OVERVIEW' | 'TRACKS' | 'EVENTS' | 'SENSORS' | 'ANALYTICS' | 'SYSTEM'
 type ServiceState = 'ONLINE' | 'DEGRADED' | 'IDLE' | 'OFFLINE'
 type ServiceInfo = { name: string; state: ServiceState; detail: string }
 type TrailPoint = { lng: number; lat: number; ts: number }
+type TrackNotice = { id: string; trackId: string; kind: 'SIGNAL LOST' | 'REACQUIRED'; ts: number }
 
 const NAV: Array<[Tab, string, React.FC<any>]> = [
   ['OVERVIEW', 'Overview', MapIcon],
@@ -93,6 +94,8 @@ function App() {
   const [layers, setLayers] = useState({ tracks: true, ellipse: true, geo: true, trails: true, sensors: true })
   const [, forceTrailRender] = useState(0)
   const [now, setNow] = useState(Date.now())
+  const previousTrackStates = useRef<Map<string, FusedTrack['state']>>(new Map())
+  const [trackNotices, setTrackNotices] = useState<TrackNotice[]>([])
 
   const metricsHistory = useRef<{ ingest: number[]; active: number[]; latency: number[]; lag: number[]; loss: number[] }>({
     ingest: [], active: [], latency: [], lag: [], loss: [],
@@ -109,6 +112,45 @@ function App() {
 
   const { metrics, connected: metricsConnected, lastMessageMs: lastMetricsMessageMs } = useMetricsStream()
   const { zones, connected: zonesConnected } = useZoneConfig()
+
+  useEffect(() => {
+    const nextStates = new Map<string, FusedTrack['state']>()
+    const notices: TrackNotice[] = []
+
+    tracks.forEach((track, id) => {
+      const previous = previousTrackStates.current.get(id)
+
+      if (previous === 'CONFIRMED' && track.state === 'COASTING') {
+        notices.push({
+          id: `${id}-lost-${track.lastUpdateMs}`,
+          trackId: id,
+          kind: 'SIGNAL LOST',
+          ts: Date.now(),
+        })
+      } else if (previous === 'COASTING' && track.state === 'CONFIRMED') {
+        notices.push({
+          id: `${id}-reacquired-${track.lastUpdateMs}`,
+          trackId: id,
+          kind: 'REACQUIRED',
+          ts: Date.now(),
+        })
+      }
+
+      nextStates.set(id, track.state)
+    })
+
+    previousTrackStates.current = nextStates
+
+    if (notices.length > 0) {
+      setTrackNotices(current => [...current, ...notices].slice(-4))
+    }
+  }, [tracks])
+
+  useEffect(() => {
+    setTrackNotices(current =>
+      current.filter(notice => now - notice.ts < 5_000)
+    )
+  }, [now])
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1_000)
@@ -340,6 +382,19 @@ function App() {
         </nav>
 
         <section className="workspace">
+          {trackNotices.length > 0 && (
+            <div className="track-transition-stack">
+              {trackNotices.map(notice => (
+                <div
+                  key={notice.id}
+                  className={`track-transition ${notice.kind === 'REACQUIRED' ? 'reacquired' : 'lost'}`}
+                >
+                  <span>{notice.kind}</span>
+                  <strong className="mono">{notice.trackId}</strong>
+                </div>
+              ))}
+            </div>
+          )}
           <main className="primary-panel">
             <MapView
               visible={tab === 'OVERVIEW'}

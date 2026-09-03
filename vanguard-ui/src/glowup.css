@@ -659,3 +659,46 @@ button:focus-visible {
     drop-shadow(0 0 2px rgba(220, 240, 225, 0.20));
 }
 
+
+
+.track-transition-stack {
+  position: fixed;
+  top: 86px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 3000;
+  display: grid;
+  gap: 6px;
+  pointer-events: none;
+}
+
+.track-transition {
+  min-width: 240px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 9px 13px;
+  border: 1px solid rgba(255,255,255,.18);
+  background: rgba(8,12,14,.94);
+  box-shadow: 0 10px 28px rgba(0,0,0,.32);
+  font-size: 11px;
+  letter-spacing: .09em;
+  backdrop-filter: blur(8px);
+}
+
+.track-transition.lost {
+  border-color: rgba(226,162,58,.72);
+}
+
+.track-transition.lost span {
+  color: #e2a23a;
+}
+
+.track-transition.reacquired {
+  border-color: rgba(57,184,106,.72);
+}
+
+.track-transition.reacquired span {
+  color: #39b86a;
+}
