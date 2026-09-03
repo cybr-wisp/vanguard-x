@@ -134,3 +134,68 @@ configuration. No blanket claim that spatial indexing improves throughput at
 all scales is made.
 
 ---
+
+## Deterministic Replay
+
+Repeated execution of the same replay workload produced identical tracking
+accuracy:
+
+| Metric | Result |
+|---|---:|
+| Replay max RMSE delta | **0** |
+| Deterministic result | **Yes** |
+
+This provides a reproducible basis for regression testing and performance
+experimentation.
+
+---
+
+## Event Deduplication
+
+The alert state machine was stress-tested using repeated identical BREACH
+inputs.
+
+**1,000 repeated BREACH inputs produced exactly 1 emitted event.**
+
+An exit followed by a later re-entry correctly produced a new zone-entry
+event.
+
+---
+
+## Packet-Loss Testing
+
+The benchmark also evaluates tracking under simulated packet loss at:
+
+- 0%
+- 5%
+- 10%
+- 20%
+
+Association accuracy remained 100% in the recorded benchmark runs.
+
+The packet-loss RMSE values are intentionally not used as headline performance
+claims because the observed RMSE decreases under several packet-loss
+conditions. This counterintuitive behavior requires further analysis of the
+evaluation methodology before those RMSE results are interpreted as tracking
+improvements.
+
+The benchmark also recorded concurrent duplicate-track behavior that warrants
+additional investigation before being promoted as a headline metric.
+
+---
+
+## Covariance and Reacquisition
+
+The benchmark validates that estimated uncertainty responds to measurement
+updates, coasting, and reacquisition.
+
+Observed behavior includes:
+
+- covariance reduction following measurement updates;
+- covariance growth while a track is coasting without observations;
+- substantial covariance reduction following reacquisition.
+
+These tests are retained primarily as estimator-correctness evidence rather
+than headline performance metrics.
+
+---
