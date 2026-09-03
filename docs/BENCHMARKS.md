@@ -199,3 +199,112 @@ These tests are retained primarily as estimator-correctness evidence rather
 than headline performance metrics.
 
 ---
+
+## Performance Engineering Experiments
+
+Java Flight Recorder profiling identified data association as the dominant
+hotspot in the benchmark workload.
+
+Three optimization hypotheses were evaluated from the frozen baseline.
+
+### 1. Conflict-Free Assignment Fast Path
+
+**Hypothesis.** If an observation has at most one feasible real candidate and
+that candidate is not simultaneously claimed by another observation, the
+assignment is unambiguous. Bypassing the Hungarian solver in those cases
+should preserve the optimal assignment while reducing unnecessary solver work.
+
+The optimization preserved correctness, but measured latency and throughput
+regressed.
+
+A likely explanation is that the fast path added bookkeeping and branching
+while still retaining much of the original cost-matrix construction work. In
+the tested workload, the additional control-flow and candidate-tracking
+overhead appears to have outweighed the solver work avoided. This remains a
+performance hypothesis rather than a proven root cause because the rejected
+variant was not separately profiled after benchmarking.
+
+**Decision: rejected.**
+
+### 2. Connected-Component Assignment
+
+**Hypothesis.** The gated observation-to-track association graph is often
+sparse. If disconnected feasible subgraphs are solved independently, then
+small unambiguous components can be assigned directly and the Hungarian solver
+can operate only on small ambiguous local matrices instead of one larger
+global matrix.
+
+The implementation preserved assignment semantics, including dedicated
+regression coverage for multiple disconnected ambiguous components.
+
+Performance nevertheless regressed substantially.
+
+A likely explanation is that sparse graph construction introduced its own
+costs: adjacency-list creation, temporary object/list allocation, connected
+component traversal, candidate remapping, and construction of multiple local
+assignment problems. Under the benchmark workload, those costs appear to have
+exceeded the savings from shrinking the Hungarian matrices. The exact cause
+was not established with a dedicated post-change profile, so this explanation
+is intentionally stated as a hypothesis.
+
+**Decision: rejected.**
+
+### 3. Hungarian Scratch-Buffer Reuse
+
+**Hypothesis.** Java Flight Recorder identified allocation inside the Hungarian
+solver as a major hotspot. Reusing the per-row `minimumReducedCost` and `used`
+arrays should reduce allocation pressure while keeping the algorithm and
+assignment semantics unchanged.
+
+The temporary arrays were therefore moved outside the Hungarian row loop and
+explicitly reset between iterations.
+
+All correctness tests passed, but the first controlled benchmark showed a
+large performance regression relative to the frozen baseline.
+
+One plausible explanation is that the JVM was already handling these
+short-lived arrays efficiently through young-generation allocation, while
+manual reuse replaced cheap allocation with repeated full-array clearing and
+additional memory writes. Cache behavior, JIT optimization, or other runtime
+effects may also have contributed. Because the rejected variant was not
+re-profiled independently, no single mechanism is claimed as the proven root
+cause.
+
+**Decision: rejected.**
+
+These experiments are intentionally documented even though they were not
+merged. Optimization changes were accepted or rejected based on measured
+performance rather than assumed improvement.
+
+---
+
+## Correctness Validation
+
+The benchmark work was performed alongside automated regression testing
+covering the simulator, tracking subsystem, association/lifecycle behavior,
+estimation, duplicate suppression, and spatial/geofence logic.
+
+The buffer-reuse experiment, for example, passed:
+
+- **23 simulator tests**
+- **44 tracking tests**
+- **18 spatial tests**
+- **0 failures**
+- **0 errors**
+
+Correctness was treated as a prerequisite for performance comparison.
+
+---
+
+## Interpretation
+
+The strongest demonstrated VANGUARD-X results are:
+
+**100% association accuracy, 0 false tracks, 10.86 m position RMSE, a 63%
+sensor-fusion RMSE improvement, 18,546 reports/s at 200 targets with spatial
+indexing, 23.92 ms p95 and 37.72 ms p99 in-process processing latency, and
+deterministic replay with zero RMSE delta across repeated executions.**
+
+These results characterize the controlled synthetic benchmark workload. They
+should not be interpreted as production hardware, real-radar, or full
+sensor-to-UI performance measurements.
