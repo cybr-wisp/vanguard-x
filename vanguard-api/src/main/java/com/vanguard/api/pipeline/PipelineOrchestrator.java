@@ -78,6 +78,24 @@ public class PipelineOrchestrator {
     private static final long SIM_TICK_MS = 70L;
     private static final long DEMO_DURATION_MS = 90_000L;
 
+    /*
+     * Deterministic sensor-denial scenario.
+     *
+     * TGT-07 remains present in world truth during this interval, but is
+     * withheld from every SensorNode. No TGT-07 measurement therefore enters
+     * the Protobuf / UDP / Kafka tracking pipeline.
+     */
+    private static final String DROPOUT_TARGET_ID = "TGT-07";
+    private static final long DROPOUT_START_MS = 15_000L;
+    private static final long DROPOUT_END_MS = 17_000L;
+
+    /*
+     * Runtime lifecycle window for the two-second denial scenario.
+     * At a 70 ms simulation cadence, 45 misses is approximately 3.15 seconds.
+     */
+    private static final int LIVE_MISSES_TO_COAST = 3;
+    private static final int LIVE_MISSES_TO_DROP = 45;
+
     private record ZoneSpec(
             String zoneId,
             String label,
@@ -249,8 +267,8 @@ public class PipelineOrchestrator {
                     associator,
                     motionModel,
                     3,
-                    3,
-                    8,
+                    LIVE_MISSES_TO_COAST,
+                    LIVE_MISSES_TO_DROP,
                     10_000,
                     62_500
             );
@@ -365,6 +383,20 @@ public class PipelineOrchestrator {
             }
 
             /*
+             * Remove TGT-07 only from the sensor-visible world during the
+             * deterministic blackout. The physical truth trajectory continues.
+             */
+            List<TargetModel.TruthRecord> observableTruth =
+                    isDropoutActive(simTimeMs)
+                            ? truth.stream()
+                                    .filter(record ->
+                                            !DROPOUT_TARGET_ID.equals(
+                                                    record.targetId()
+                                            ))
+                                    .toList()
+                            : truth;
+
+            /*
              * The world uses deterministic simulated time for motion.
              * Wire timestamps use wall-clock time because the gateway
              * validates packet freshness.
@@ -375,7 +407,7 @@ public class PipelineOrchestrator {
             for (SensorNode sensor : sensors) {
                 List<SensorNode.RawReport> reports =
                         sensor.observe(
-                                truth,
+                                observableTruth,
                                 observationTimeMs,
                                 rng
                         );
@@ -425,6 +457,11 @@ public class PipelineOrchestrator {
             }
         }
     }
+    private static boolean isDropoutActive(long simulationTimeMs) {
+        return simulationTimeMs >= DROPOUT_START_MS
+                && simulationTimeMs < DROPOUT_END_MS;
+    }
+
 
     /**
      * Kafka raw report processor.
