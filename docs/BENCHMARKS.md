@@ -42,3 +42,37 @@ baseline using median results rather than selecting the best run.
 | Repeated BREACH inputs | **1,000 -> 1 emitted event** |
 
 ---
+
+## Tracking Accuracy
+
+The tracking benchmark evaluates estimated tracks against simulator ground
+truth.
+
+| Metric | Result |
+|---|---:|
+| Position RMSE | **10.86 m** |
+| Velocity RMSE | **4.17 m/s** |
+| Association accuracy | **100.0%** |
+| False tracks | **0** |
+
+These measurements are produced under the benchmark's synthetic sensor,
+motion, and noise model and should be interpreted within that workload rather
+than as real-world radar performance claims.
+
+---
+
+## Sensor Fusion
+
+VANGUARD-X combines noisy sensor observations through its tracking and
+estimation pipeline.
+
+| Metric | Result |
+|---|---:|
+| Raw observation RMSE | **29.24 m** |
+| Fused RMSE | **10.82 m** |
+| RMSE improvement | **63.0%** |
+
+The benchmark therefore observed a 63% reduction in positional RMSE relative
+to the raw sensor measurements under the tested simulation.
+
+---
