@@ -17,12 +17,12 @@ export function headingDeg(vx: number, vy: number) {
 }
 
 export function fmtTime(ms: number) {
-  if (!Number.isFinite(ms) || ms <= 0) return 'â€”'
+  if (!Number.isFinite(ms) || ms <= 0) return '—'
   return new Date(ms).toISOString().slice(11, 19) + 'Z'
 }
 
 export function fmtAge(ms: number) {
-  if (!Number.isFinite(ms)) return 'â€”'
+  if (!Number.isFinite(ms)) return '—'
   if (ms < 1_000) return `${Math.max(0, ms)} ms ago`
   if (ms < 60_000) return `${(ms / 1_000).toFixed(1)} s ago`
   return `${Math.floor(ms / 60_000)}m ago`

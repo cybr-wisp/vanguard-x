@@ -313,7 +313,7 @@ export function App() {
 
     return activeBreaches
   }, [events, aliveTracks])
-  const uptime = metrics ? fmtDuration(metrics.uptimeMs) : 'â€”'
+  const uptime = metrics ? fmtDuration(metrics.uptimeMs) : '—'
 
   const centerTrack = (track: FusedTrack) => {
     setTab('OVERVIEW')
