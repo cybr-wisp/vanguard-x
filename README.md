@@ -11,13 +11,15 @@ A fault-tolerant multi-sensor track correlation and state-estimation system buil
 
 | Metric | Value |
 |--------|-------|
-| Sustained throughput | [MEASURED] reports/sec |
-| End-to-end latency (p99) | [MEASURED] ms |
-| Position RMSE (3 sensors) | [MEASURED] m |
-| Association accuracy | [MEASURED]% |
-| Recovery from processor failure | [MEASURED] sec |
+| Sustained throughput (200 targets, indexed) | **18,546 reports/s** |
+| Tracking processing latency (p99, 200 targets) | **37.72 ms** |
+| Position RMSE | **10.86 m** |
+| Velocity RMSE | **4.17 m/s** |
+| Association accuracy | **100.0%** |
+| False tracks | **0** |
+| Raw-to-fused position RMSE improvement | **63.0%** |
 
-*All values are measured on [hardware]. Design targets are not reported as results.*
+*Results are from the frozen three-run JDK 21 benchmark baseline on an 8-core host. Latency is in-process tracking latency, not full sensor-to-browser end-to-end latency. See `docs/BENCHMARKS.md` for methodology and limitations.*
 
 ## Architecture
 
@@ -73,7 +75,7 @@ See `docs/reliability/` for detailed failure scenarios and metrics.
 docker compose up --build
 
 # The UI is at http://localhost:3000
-# The API is at http://localhost:8080
+# The API is at http://localhost:8081
 # Grafana dashboards at http://localhost:3001
 ```
 
