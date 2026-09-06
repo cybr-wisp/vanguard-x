@@ -28,60 +28,34 @@ import { useTrackStream } from './hooks/useTrackStream'
 import { useMetricsStream } from './hooks/useMetricsStream'
 import { useZoneConfig } from './hooks/useZoneConfig'
 import type { FusedTrack, SystemMetrics, TrackEvent, ZoneDefinition } from './lib/types'
-
-const MAP_CENTER: [number, number] = [-117.13, 34.745]
-const MAP_ZOOM = 10.8
-const METERS_PER_DEG_LNG = 92_000
-const METERS_PER_DEG_LAT = 111_000
-const TRACK_STALE_MS = 10_000
-
-const SATELLITE_BASEMAP = true
-
-const SENSORS = [
-  { id: 'SSA-01', lng: -117.35, lat: 34.79, type: 'Range / bearing sensor' },
-  { id: 'SSB-02', lng: -117.38, lat: 34.71, type: 'Range / bearing sensor' },
-  { id: 'SSC-03', lng: -117.05, lat: 34.68, type: 'Range / bearing sensor' },
-] as const
-
-const TRACK_COLORS: Record<FusedTrack['state'], string> = {
-  TENTATIVE: '#7d8a99',
-  CONFIRMED: '#39b86a',
-  COASTING: '#e2a23a',
-  DROPPED: '#d9535f',
-}
-
-const BENCHMARK = {
-  jvm: '21.0.12.1',
-  cores: 8,
-
-  positionRmse: 10.86,
-  velocityRmse: 4.17,
-  association: 100.0,
-  falseTracks: 0,
-
-  rawRmse: 29.24,
-  fusedRmse: 10.82,
-  fusionGain: 63.0,
-
-  throughput: {
-    50: 48_858,
-    200: 21_348,
-    500: 14_962,
-    1000: 16_696,
-  },
-
-  operationalLatency: {
-    p50: 13.49,
-    p95: 18.45,
-    p99: 20.73,
-  },
-} as const
-
-type Tab = 'OVERVIEW' | 'TRACKS' | 'EVENTS' | 'SENSORS' | 'ANALYTICS' | 'SYSTEM' | 'BENCHMARKS'
-type ServiceState = 'ONLINE' | 'DEGRADED' | 'IDLE' | 'OFFLINE'
-type ServiceInfo = { name: string; state: ServiceState; detail: string }
-type TrailPoint = { lng: number; lat: number; ts: number }
-type TrackNotice = { id: string; trackId: string; kind: 'SIGNAL LOST' | 'REACQUIRED'; ts: number }
+import { BENCHMARK } from './config/benchmark'
+import {
+  MAP_CENTER,
+  MAP_ZOOM,
+  METERS_PER_DEG_LAT,
+  METERS_PER_DEG_LNG,
+  SATELLITE_BASEMAP,
+  SENSORS,
+  TRACK_COLORS,
+  TRACK_STALE_MS,
+} from './config/tactical'
+import type {
+  ServiceInfo,
+  ServiceState,
+  Tab,
+  TrackNotice,
+  TrailPoint,
+} from './lib/uiTypes'
+import {
+  appendHistory,
+  fmtAge,
+  fmtCompact,
+  fmtDuration,
+  fmtTime,
+  headingDeg,
+  stateRank,
+  validLngLat,
+} from './lib/uiUtils'
 
 const NAV: Array<[Tab, string, React.FC<any>]> = [
   ['OVERVIEW', 'Overview', MapIcon],
@@ -1494,54 +1468,6 @@ function zoneFeature(
       coordinates: [coordinates],
     },
   }
-}
-
-function appendHistory(values: number[], next: number) {
-  return [...values.slice(-39), Number.isFinite(next) ? next : 0]
-}
-
-function validLngLat(lng: number, lat: number) {
-  return Number.isFinite(lng) && Number.isFinite(lat) && Math.abs(lng) <= 180 && Math.abs(lat) <= 90
-}
-
-function stateRank(state: FusedTrack['state']) {
-  return state === 'CONFIRMED' ? 0 : state === 'COASTING' ? 1 : state === 'TENTATIVE' ? 2 : 3
-}
-
-function headingDeg(vx: number, vy: number) {
-  return (Math.atan2(vx, vy) * 180 / Math.PI + 360) % 360
-}
-
-function fmtTime(ms: number) {
-  if (!Number.isFinite(ms) || ms <= 0) return 'â€”'
-  return new Date(ms).toISOString().slice(11, 19) + 'Z'
-}
-
-function fmtAge(ms: number) {
-  if (!Number.isFinite(ms)) return 'â€”'
-  if (ms < 1_000) return `${Math.max(0, ms)} ms ago`
-  if (ms < 60_000) return `${(ms / 1_000).toFixed(1)} s ago`
-  return `${Math.floor(ms / 60_000)}m ago`
-}
-
-function fmtDuration(ms: number) {
-  const totalSeconds = Math.max(0, Math.floor(ms / 1_000))
-  const days = Math.floor(totalSeconds / 86_400)
-  const hours = Math.floor((totalSeconds % 86_400) / 3_600)
-  const minutes = Math.floor((totalSeconds % 3_600) / 60)
-  const seconds = totalSeconds % 60
-
-  if (days) return `${days}d ${hours}h ${minutes}m`
-  if (hours) return `${hours}h ${minutes}m ${seconds}s`
-  if (minutes) return `${minutes}m ${seconds}s`
-  return `${seconds}s`
-}
-
-function fmtCompact(value: number) {
-  if (!Number.isFinite(value)) return '0'
-  if (Math.abs(value) >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`
-  if (Math.abs(value) >= 1_000) return `${(value / 1_000).toFixed(1)}K`
-  return Math.round(value).toLocaleString()
 }
 
 ReactDOM.createRoot(document.getElementById('root')!).render(<App />)
