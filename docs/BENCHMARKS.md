@@ -82,7 +82,7 @@ to the raw sensor measurements under the tested simulation.
 
 ## Processing Latency
 
-### 200 Targets â€” Spatial Index Enabled
+### 200 Targets - Operational Spatial Grid (300 m)
 
 Three-run median:
 
@@ -95,7 +95,7 @@ Three-run median:
 The spatial-index-enabled configuration is treated as the primary operational
 benchmark configuration.
 
-### 200 Targets â€” Without Spatial Index
+### 200 Targets - Coarse Spatial Grid (2,000 m)
 
 Three-run median:
 
