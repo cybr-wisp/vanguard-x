@@ -35,7 +35,7 @@ export function AnalyticsTab({
         <ShieldCheck size={18} />
         <div>
           <strong>Measured benchmark reference</strong>
-          <span>{BENCHMARK.throughput[200].toLocaleString()} reports/s @ 200 targets Â· {BENCHMARK.positionRmse.toFixed(2)} m RMSE Â· {BENCHMARK.association}% association</span>
+          <span>{BENCHMARK.throughput[200].toLocaleString()} reports/s @ 200 targets · {BENCHMARK.positionRmse.toFixed(2)} m RMSE · {BENCHMARK.association}% association</span>
         </div>
       </div>
     </TabShell>

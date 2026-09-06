@@ -58,7 +58,7 @@ export function MiniEvent({ event }: { event: TrackEvent }) {
       <div className="mini-event-time mono">{fmtTime(event.timestampMs)}</div>
       <div className="mini-event-copy">
         <strong className={colorClass}>{event.type.replace(/_/g, ' ')}</strong>
-        <span>{event.trackId} Â· {event.zoneId}</span>
+        <span>{event.trackId} · {event.zoneId}</span>
       </div>
     </div>
   )
