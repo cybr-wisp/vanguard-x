@@ -64,16 +64,16 @@ const BENCHMARK = {
   fusionGain: 63.0,
 
   throughput: {
-    50: 35_728,
-    200: 18_546,
-    500: 12_485,
-    1000: 9_771,
+    50: 48_858,
+    200: 21_348,
+    500: 14_962,
+    1000: 16_696,
   },
 
-  indexedLatency: {
-    p50: 16.74,
-    p95: 23.92,
-    p99: 37.72,
+  operationalLatency: {
+    p50: 13.49,
+    p95: 18.45,
+    p99: 20.73,
   },
 } as const
 
@@ -312,7 +312,7 @@ function App() {
 
     return activeBreaches
   }, [events, aliveTracks])
-  const uptime = metrics ? fmtDuration(metrics.uptimeMs) : '—'
+  const uptime = metrics ? fmtDuration(metrics.uptimeMs) : 'â€”'
 
   const centerTrack = (track: FusedTrack) => {
     setTab('OVERVIEW')
@@ -778,7 +778,7 @@ function MapView({
               <g transform={`translate(${point.x + labelOffset.x},${point.y + labelOffset.y}) scale(0.84)`}>
                 <rect width={140} height={34} rx={2} fill={selected ? 'rgba(6,13,14,.96)' : 'rgba(6,13,14,.88)'} stroke={color} strokeWidth={selected ? 1.4 : 0.8} />
                 <text x={9} y={13} fill="#f4f7fa" fontSize={10.5} fontWeight={750}>{id}</text>
-                <text x={9} y={26} fill="#a7b4c0" fontSize={8.5}>{track.state} · {Math.round(speedMps)} m/s</text>
+                <text x={9} y={26} fill="#a7b4c0" fontSize={8.5}>{track.state} Â· {Math.round(speedMps)} m/s</text>
               </g>
             </g>
           )
@@ -821,9 +821,9 @@ function TracksTab({
                 <td className="mono strong">{id}</td>
                 <td><StatePill state={track.state} /></td>
                 <td>{Math.hypot(track.vx, track.vy).toFixed(1)} m/s</td>
-                <td>{Math.round(headingDeg(track.vx, track.vy))}°</td>
+                <td>{Math.round(headingDeg(track.vx, track.vy))}Â°</td>
                 <td>{track.uncertainty.toFixed(1)} m</td>
-                <td>{track.contributingSensors?.join(', ') || '—'}</td>
+                <td>{track.contributingSensors?.join(', ') || 'â€”'}</td>
                 <td>{fmtAge(now - track.lastUpdateMs)}</td>
               </tr>
             ))}
@@ -849,7 +849,7 @@ function EventsTab({ events }: { events: TrackEvent[] }) {
                 <td><EventPill type={event.type} /></td>
                 <td className="mono strong">{event.trackId}</td>
                 <td>{event.zoneId}</td>
-                <td>{event.previousState} → {event.newState}</td>
+                <td>{event.previousState} â†’ {event.newState}</td>
                 <td className="mono">{event.py.toFixed(4)}, {event.px.toFixed(4)}</td>
               </tr>
             ))}
@@ -919,7 +919,7 @@ function AnalyticsTab({
         <ShieldCheck size={18} />
         <div>
           <strong>Measured benchmark reference</strong>
-          <span>{BENCHMARK.throughput[200].toLocaleString()} reports/s @ 200 targets · {BENCHMARK.positionRmse.toFixed(2)} m RMSE · {BENCHMARK.association}% association</span>
+          <span>{BENCHMARK.throughput[200].toLocaleString()} reports/s @ 200 targets Â· {BENCHMARK.positionRmse.toFixed(2)} m RMSE Â· {BENCHMARK.association}% association</span>
         </div>
       </div>
     </TabShell>
@@ -987,7 +987,7 @@ function SystemTab({
 
 function BenchmarksTab() {
   return (
-    <TabShell title="Benchmark Results" subtitle={`Frozen three-run median · JVM ${BENCHMARK.jvm} · ${BENCHMARK.cores} cores · FullBenchmark`}>
+    <TabShell title="Benchmark Results" subtitle={`Frozen three-run median Â· JVM ${BENCHMARK.jvm} Â· ${BENCHMARK.cores} cores Â· FullBenchmark`}>
       <div className="benchmark-hero-grid">
         <BigMetric label="Position RMSE" value={BENCHMARK.positionRmse.toFixed(2)} unit="m" good />
         <BigMetric label="Association" value={`${BENCHMARK.association}%`} unit="accuracy" good />
@@ -1007,20 +1007,20 @@ function BenchmarksTab() {
           <InfoRow label="Raw RMSE" value={`${BENCHMARK.rawRmse.toFixed(2)} m`} />
           <InfoRow label="Fused RMSE" value={`${BENCHMARK.fusedRmse.toFixed(2)} m`} />
           <InfoRow label="Improvement" value={`${BENCHMARK.fusionGain}%`} />
-          <InfoRow label="Event deduplication" value="1000 → 1" />
-          <InfoRow label="Replay determinism" value="IDENTICAL · Δ 0.00e+00 m" />
+          <InfoRow label="Event deduplication" value="1000 â†’ 1" />
+          <InfoRow label="Replay determinism" value="IDENTICAL Â· Î” 0.00e+00 m" />
         </BenchmarkPanel>
 
-        <BenchmarkPanel title="Throughput · after spatial index">
+        <BenchmarkPanel title="Throughput Â· after spatial index">
           {Object.entries(BENCHMARK.throughput).map(([targets, rate]) => (
             <InfoRow key={targets} label={`${targets} targets`} value={`${rate.toLocaleString()} reports/s`} />
           ))}
         </BenchmarkPanel>
 
-        <BenchmarkPanel title="Tracking latency · 200 targets">
-          <InfoRow label="Indexed p50" value={`${BENCHMARK.indexedLatency.p50.toFixed(2)} ms`} />
-          <InfoRow label="Indexed p95" value={`${BENCHMARK.indexedLatency.p95.toFixed(2)} ms`} />
-          <InfoRow label="Indexed p99" value={`${BENCHMARK.indexedLatency.p99.toFixed(2)} ms`} />
+        <BenchmarkPanel title="Tracking latency Â· 200 targets">
+          <InfoRow label="Indexed p50" value={`${BENCHMARK.operationalLatency.p50.toFixed(2)} ms`} />
+          <InfoRow label="Indexed p95" value={`${BENCHMARK.operationalLatency.p95.toFixed(2)} ms`} />
+          <InfoRow label="Indexed p99" value={`${BENCHMARK.operationalLatency.p99.toFixed(2)} ms`} />
         </BenchmarkPanel>
 
         <BenchmarkPanel title="Covariance behavior">
@@ -1088,14 +1088,14 @@ function TrackInspector({
       </div>
 
       <div className="inspector-grid">
-        <InfoRow label="Ground speed" value={`${speedMps.toFixed(1)} m/s · ${Math.round(speedKnots)} kt`} />
-        <InfoRow label="Heading" value={`${Math.round(heading)}°`} />
+        <InfoRow label="Ground speed" value={`${speedMps.toFixed(1)} m/s Â· ${Math.round(speedKnots)} kt`} />
+        <InfoRow label="Heading" value={`${Math.round(heading)}Â°`} />
         <InfoRow label="Coordinates" value={`${track.py.toFixed(5)}, ${track.px.toFixed(5)}`} />
         <InfoRow label="Position uncertainty" value={`${track.uncertainty.toFixed(1)} m`} />
-        <InfoRow label="Ellipse major" value={track.ellipseMajor != null ? `${track.ellipseMajor.toFixed(1)} m` : '—'} />
-        <InfoRow label="Ellipse minor" value={track.ellipseMinor != null ? `${track.ellipseMinor.toFixed(1)} m` : '—'} />
-        <InfoRow label="Last update" value={`${fmtTime(track.lastUpdateMs)} · ${fmtAge(now - track.lastUpdateMs)}`} />
-        <InfoRow label="Sensor sources" value={track.contributingSensors?.join(', ') || '—'} />
+        <InfoRow label="Ellipse major" value={track.ellipseMajor != null ? `${track.ellipseMajor.toFixed(1)} m` : 'â€”'} />
+        <InfoRow label="Ellipse minor" value={track.ellipseMinor != null ? `${track.ellipseMinor.toFixed(1)} m` : 'â€”'} />
+        <InfoRow label="Last update" value={`${fmtTime(track.lastUpdateMs)} Â· ${fmtAge(now - track.lastUpdateMs)}`} />
+        <InfoRow label="Sensor sources" value={track.contributingSensors?.join(', ') || 'â€”'} />
       </div>
 
       <div className="subsection-title">GEOFENCE STATUS</div>
@@ -1205,10 +1205,10 @@ function SensorStatus({ tracks, connected }: { tracks: Array<[string, FusedTrack
           <SummaryStat label="RMSE" value={`${BENCHMARK.positionRmse.toFixed(1)} m`} />
           <SummaryStat label="ASSOC." value={`${BENCHMARK.association}%`} />
           <SummaryStat label="200 TARGETS" value={`${(BENCHMARK.throughput[200] / 1000).toFixed(1)}K/s`} />
-          <SummaryStat label="INDEXED P99" value={`${BENCHMARK.indexedLatency.p99.toFixed(1)} ms`} />
+          <SummaryStat label="INDEXED P99" value={`${BENCHMARK.operationalLatency.p99.toFixed(1)} ms`} />
         </div>
 
-        <div className="snapshot-note">Measured benchmark · not live telemetry</div>
+        <div className="snapshot-note">Measured benchmark Â· not live telemetry</div>
       </div>
     </section>
   )
@@ -1232,7 +1232,7 @@ function EventFeed({ events }: { events: TrackEvent[] }) {
           <span className="mono">{fmtTime(event.timestampMs)}</span>
           <span><EventPill type={event.type} /></span>
           <span className="mono strong">{event.trackId}</span>
-          <span>{event.zoneId} · {event.previousState} → {event.newState}</span>
+          <span>{event.zoneId} Â· {event.previousState} â†’ {event.newState}</span>
         </div>
       ))}
 
@@ -1295,7 +1295,7 @@ function MiniEvent({ event }: { event: TrackEvent }) {
       <div className="mini-event-time mono">{fmtTime(event.timestampMs)}</div>
       <div className="mini-event-copy">
         <strong className={colorClass}>{event.type.replace(/_/g, ' ')}</strong>
-        <span>{event.trackId} · {event.zoneId}</span>
+        <span>{event.trackId} Â· {event.zoneId}</span>
       </div>
     </div>
   )
@@ -1513,12 +1513,12 @@ function headingDeg(vx: number, vy: number) {
 }
 
 function fmtTime(ms: number) {
-  if (!Number.isFinite(ms) || ms <= 0) return '—'
+  if (!Number.isFinite(ms) || ms <= 0) return 'â€”'
   return new Date(ms).toISOString().slice(11, 19) + 'Z'
 }
 
 function fmtAge(ms: number) {
-  if (!Number.isFinite(ms)) return '—'
+  if (!Number.isFinite(ms)) return 'â€”'
   if (ms < 1_000) return `${Math.max(0, ms)} ms ago`
   if (ms < 60_000) return `${(ms / 1_000).toFixed(1)} s ago`
   return `${Math.floor(ms / 60_000)}m ago`

@@ -11,8 +11,8 @@ A fault-tolerant multi-sensor track correlation and state-estimation system buil
 
 | Metric | Value |
 |--------|-------|
-| Sustained throughput (200 targets, indexed) | **18,546 reports/s** |
-| Tracking processing latency (p99, 200 targets) | **37.72 ms** |
+| Sustained throughput (200 targets, 300 m operational grid) | **21,348 reports/s** |
+| Tracking processing latency (p99, 200 targets) | **20.73 ms** |
 | Position RMSE | **10.86 m** |
 | Velocity RMSE | **4.17 m/s** |
 | Association accuracy | **100.0%** |
@@ -111,7 +111,7 @@ Performance results use a fixed send schedule (coordinated-omission-aware), warm
 - No cloud deployment (Docker Compose only); Kubernetes deferred
 - Single-host Redis; production would use a cluster
 - No TLS on internal network paths (development only)
-- EKF assumes constant-velocity; IMM (interacting multiple model) would handle maneuvers better
+- The frozen full-system baseline uses the constant-velocity EKF; an implemented and held-out-evaluated IMM improves maneuvering-target estimation but has not yet been promoted to the default tracker
 
 ## License
 
