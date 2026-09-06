@@ -309,7 +309,7 @@ export function MapView({
               <g transform={`translate(${point.x + labelOffset.x},${point.y + labelOffset.y}) scale(0.84)`}>
                 <rect width={140} height={34} rx={2} fill={selected ? 'rgba(6,13,14,.96)' : 'rgba(6,13,14,.88)'} stroke={color} strokeWidth={selected ? 1.4 : 0.8} />
                 <text x={9} y={13} fill="#f4f7fa" fontSize={10.5} fontWeight={750}>{id}</text>
-                <text x={9} y={26} fill="#a7b4c0" fontSize={8.5}>{track.state} Â· {Math.round(speedMps)} m/s</text>
+                <text x={9} y={26} fill="#a7b4c0" fontSize={8.5}>{track.state} · {Math.round(speedMps)} m/s</text>
               </g>
             </g>
           )
