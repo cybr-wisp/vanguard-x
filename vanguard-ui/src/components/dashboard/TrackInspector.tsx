@@ -46,14 +46,14 @@ export function TrackInspector({
       </div>
 
       <div className="inspector-grid">
-        <InfoRow label="Ground speed" value={`${speedMps.toFixed(1)} m/s Â· ${Math.round(speedKnots)} kt`} />
-        <InfoRow label="Heading" value={`${Math.round(heading)}Â°`} />
+        <InfoRow label="Ground speed" value={`${speedMps.toFixed(1)} m/s · ${Math.round(speedKnots)} kt`} />
+        <InfoRow label="Heading" value={`${Math.round(heading)}°`} />
         <InfoRow label="Coordinates" value={`${track.py.toFixed(5)}, ${track.px.toFixed(5)}`} />
         <InfoRow label="Position uncertainty" value={`${track.uncertainty.toFixed(1)} m`} />
-        <InfoRow label="Ellipse major" value={track.ellipseMajor != null ? `${track.ellipseMajor.toFixed(1)} m` : 'â€”'} />
-        <InfoRow label="Ellipse minor" value={track.ellipseMinor != null ? `${track.ellipseMinor.toFixed(1)} m` : 'â€”'} />
-        <InfoRow label="Last update" value={`${fmtTime(track.lastUpdateMs)} Â· ${fmtAge(now - track.lastUpdateMs)}`} />
-        <InfoRow label="Sensor sources" value={track.contributingSensors?.join(', ') || 'â€”'} />
+        <InfoRow label="Ellipse major" value={track.ellipseMajor != null ? `${track.ellipseMajor.toFixed(1)} m` : '—'} />
+        <InfoRow label="Ellipse minor" value={track.ellipseMinor != null ? `${track.ellipseMinor.toFixed(1)} m` : '—'} />
+        <InfoRow label="Last update" value={`${fmtTime(track.lastUpdateMs)} · ${fmtAge(now - track.lastUpdateMs)}`} />
+        <InfoRow label="Sensor sources" value={track.contributingSensors?.join(', ') || '—'} />
       </div>
 
       <div className="subsection-title">GEOFENCE STATUS</div>

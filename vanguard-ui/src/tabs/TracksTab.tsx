@@ -24,9 +24,9 @@ export function TracksTab({
                 <td className="mono strong">{id}</td>
                 <td><StatePill state={track.state} /></td>
                 <td>{Math.hypot(track.vx, track.vy).toFixed(1)} m/s</td>
-                <td>{Math.round(headingDeg(track.vx, track.vy))}Â°</td>
+                <td>{Math.round(headingDeg(track.vx, track.vy))}°</td>
                 <td>{track.uncertainty.toFixed(1)} m</td>
-                <td>{track.contributingSensors?.join(', ') || 'â€”'}</td>
+                <td>{track.contributingSensors?.join(', ') || '—'}</td>
                 <td>{fmtAge(now - track.lastUpdateMs)}</td>
               </tr>
             ))}
