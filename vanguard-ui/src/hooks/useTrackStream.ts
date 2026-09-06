@@ -1,12 +1,8 @@
 import { useEffect, useState } from 'react';
 import type { FusedTrack, TrackEvent } from '../lib/types';
 
-const BACKEND_HOST =
-  (import.meta.env.VITE_BACKEND_HOST as string | undefined)?.trim()
-  || `${window.location.hostname}:8081`;
-
 const WS_SCHEME = window.location.protocol === 'https:' ? 'wss' : 'ws';
-const WS_HOST = `${WS_SCHEME}://${BACKEND_HOST}`;
+const WS_HOST = `${WS_SCHEME}://${window.location.host}`;
 
 let globalTracks = new Map<string, FusedTrack>();
 let globalEvents: TrackEvent[] = [];

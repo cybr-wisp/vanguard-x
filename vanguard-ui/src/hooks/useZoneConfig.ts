@@ -1,12 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { ZoneDefinition } from '../lib/types'
 
-const BACKEND_HOST =
-  (import.meta.env.VITE_BACKEND_HOST as string | undefined)?.trim()
-  || `${window.location.hostname}:8081`
-
-const HTTP_SCHEME = window.location.protocol === 'https:' ? 'https' : 'http'
-const ZONES_URL = `${HTTP_SCHEME}://${BACKEND_HOST}/api/zones`
+const ZONES_URL = '/api/zones'
 
 export function useZoneConfig() {
   const [zones, setZones] = useState<ZoneDefinition[]>([])
