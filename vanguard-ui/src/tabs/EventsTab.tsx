@@ -16,7 +16,7 @@ export function EventsTab({ events }: { events: TrackEvent[] }) {
                 <td><EventPill type={event.type} /></td>
                 <td className="mono strong">{event.trackId}</td>
                 <td>{event.zoneId}</td>
-                <td>{event.previousState} â†’ {event.newState}</td>
+                <td>{event.previousState} → {event.newState}</td>
                 <td className="mono">{event.py.toFixed(4)}, {event.px.toFixed(4)}</td>
               </tr>
             ))}

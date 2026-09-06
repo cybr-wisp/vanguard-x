@@ -20,7 +20,7 @@ export function EventFeed({ events }: { events: TrackEvent[] }) {
           <span className="mono">{fmtTime(event.timestampMs)}</span>
           <span><EventPill type={event.type} /></span>
           <span className="mono strong">{event.trackId}</span>
-          <span>{event.zoneId} Â· {event.previousState} â†’ {event.newState}</span>
+          <span>{event.zoneId} · {event.previousState} → {event.newState}</span>
         </div>
       ))}
 
