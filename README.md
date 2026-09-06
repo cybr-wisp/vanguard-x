@@ -1,5 +1,7 @@
 # VANGUARD
 
+[![CI](https://github.com/cybr-wisp/vanguard-x/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/cybr-wisp/vanguard-x/actions/workflows/ci.yml)
+
 A fault-tolerant multi-sensor track correlation and state-estimation system built in Java 21. Vanguard ingests asynchronous synthetic range/bearing reports over UDP, associates observations across imperfect sensors, estimates canonical target state with an Extended Kalman Filter, detects stateful spatial events, and maintains a live operational picture under packet loss, jitter, and processing-node failures.
 
 > **Portfolio scope:** Vanguard is an educational, simulated, unclassified software project. It uses synthetic sensors and synthetic trajectories to demonstrate systems engineering concepts. It is not a real combat system, weapon-control system, or operational targeting tool.
