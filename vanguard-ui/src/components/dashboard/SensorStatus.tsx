@@ -37,10 +37,10 @@ export function SensorStatus({ tracks, connected }: { tracks: Array<[string, Fus
           <SummaryStat label="RMSE" value={`${BENCHMARK.positionRmse.toFixed(1)} m`} />
           <SummaryStat label="ASSOC." value={`${BENCHMARK.association}%`} />
           <SummaryStat label="200 TARGETS" value={`${(BENCHMARK.throughput[200] / 1000).toFixed(1)}K/s`} />
-          <SummaryStat label="INDEXED P99" value={`${BENCHMARK.operationalLatency.p99.toFixed(1)} ms`} />
+          <SummaryStat label="OPERATIONAL P99" value={`${BENCHMARK.operationalLatency.p99.toFixed(1)} ms`} />
         </div>
 
-        <div className="snapshot-note">Measured benchmark Â· not live telemetry</div>
+        <div className="snapshot-note">Measured benchmark · not live telemetry</div>
       </div>
     </section>
   )

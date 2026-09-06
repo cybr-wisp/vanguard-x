@@ -8,7 +8,7 @@ import {
 
 export function BenchmarksTab() {
   return (
-    <TabShell title="Benchmark Results" subtitle={`Frozen three-run median Â· JVM ${BENCHMARK.jvm} Â· ${BENCHMARK.cores} cores Â· FullBenchmark`}>
+    <TabShell title="Benchmark Results" subtitle={`Frozen three-run median · JVM ${BENCHMARK.jvm} · ${BENCHMARK.cores} cores · FullBenchmark`}>
       <div className="benchmark-hero-grid">
         <BigMetric label="Position RMSE" value={BENCHMARK.positionRmse.toFixed(2)} unit="m" good />
         <BigMetric label="Association" value={`${BENCHMARK.association}%`} unit="accuracy" good />
@@ -28,20 +28,20 @@ export function BenchmarksTab() {
           <InfoRow label="Raw RMSE" value={`${BENCHMARK.rawRmse.toFixed(2)} m`} />
           <InfoRow label="Fused RMSE" value={`${BENCHMARK.fusedRmse.toFixed(2)} m`} />
           <InfoRow label="Improvement" value={`${BENCHMARK.fusionGain}%`} />
-          <InfoRow label="Event deduplication" value="1000 â†’ 1" />
-          <InfoRow label="Replay determinism" value="IDENTICAL Â· Î” 0.00e+00 m" />
+          <InfoRow label="Event deduplication" value="1000 → 1" />
+          <InfoRow label="Replay determinism" value="IDENTICAL · Δ 0.00e+00 m" />
         </BenchmarkPanel>
 
-        <BenchmarkPanel title="Throughput Â· after spatial index">
+        <BenchmarkPanel title="Throughput · operational 300 m grid">
           {Object.entries(BENCHMARK.throughput).map(([targets, rate]) => (
             <InfoRow key={targets} label={`${targets} targets`} value={`${rate.toLocaleString()} reports/s`} />
           ))}
         </BenchmarkPanel>
 
-        <BenchmarkPanel title="Tracking latency Â· 200 targets">
-          <InfoRow label="Indexed p50" value={`${BENCHMARK.operationalLatency.p50.toFixed(2)} ms`} />
-          <InfoRow label="Indexed p95" value={`${BENCHMARK.operationalLatency.p95.toFixed(2)} ms`} />
-          <InfoRow label="Indexed p99" value={`${BENCHMARK.operationalLatency.p99.toFixed(2)} ms`} />
+        <BenchmarkPanel title="In-process tracking latency · 200 targets">
+          <InfoRow label="Operational p50" value={`${BENCHMARK.operationalLatency.p50.toFixed(2)} ms`} />
+          <InfoRow label="Operational p95" value={`${BENCHMARK.operationalLatency.p95.toFixed(2)} ms`} />
+          <InfoRow label="Operational p99" value={`${BENCHMARK.operationalLatency.p99.toFixed(2)} ms`} />
         </BenchmarkPanel>
 
         <BenchmarkPanel title="Covariance behavior">
