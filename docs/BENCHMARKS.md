@@ -131,10 +131,10 @@ general latency optimization based on these measurements.
 | 500 | **4,099 reports/s** |
 | 1,000 | **3,201 reports/s** |
 
-Spatial indexing improves throughput at several lower target counts in this
-benchmark, but the 1,000-target result regresses relative to the non-indexed
-configuration. No blanket claim that spatial indexing improves throughput at
-all scales is made.
+The 300 m operational spatial grid outperforms the 2,000 m coarse-grid
+configuration at every measured target count in this benchmark. Both
+configurations use the spatial index; this comparison isolates spatial-grid
+granularity rather than indexing versus no indexing.
 
 ---
 
