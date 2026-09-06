@@ -3,6 +3,7 @@
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
                              https://maven.apache.org/xsd/maven-4.0.0.xsd">
+
     <modelVersion>4.0.0</modelVersion>
 
     <parent>
@@ -12,28 +13,94 @@
     </parent>
 
     <artifactId>integration-tests</artifactId>
-    <description>End-to-end integration tests for the full pipeline</description>
+    <description>Integration tests for Vanguard Kafka, Redis, tracking, recovery, and replay behavior</description>
+
+    <properties>
+        <testcontainers.version>2.0.5</testcontainers.version>
+    </properties>
 
     <dependencies>
+        <dependency>
+            <groupId>org.apache.commons</groupId>
+            <artifactId>commons-lang3</artifactId>
+            <version>3.18.0</version>
+            <scope>test</scope>
+        </dependency>
         <dependency>
             <groupId>com.vanguard</groupId>
             <artifactId>vanguard-simulator</artifactId>
         </dependency>
+
         <dependency>
             <groupId>com.vanguard</groupId>
             <artifactId>vanguard-gateway</artifactId>
         </dependency>
+
         <dependency>
             <groupId>com.vanguard</groupId>
             <artifactId>vanguard-tracking</artifactId>
         </dependency>
+
         <dependency>
             <groupId>com.vanguard</groupId>
             <artifactId>vanguard-spatial</artifactId>
         </dependency>
+
         <dependency>
             <groupId>com.vanguard</groupId>
             <artifactId>vanguard-api</artifactId>
         </dependency>
+
+        <dependency>
+            <groupId>org.apache.kafka</groupId>
+            <artifactId>kafka-clients</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>io.lettuce</groupId>
+            <artifactId>lettuce-core</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers</artifactId>
+            <version>${testcontainers.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-kafka</artifactId>
+            <version>${testcontainers.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-junit-jupiter</artifactId>
+            <version>${testcontainers.version}</version>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-failsafe-plugin</artifactId>
+                <version>3.3.1</version>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>integration-test</goal>
+                            <goal>verify</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+
 </project>

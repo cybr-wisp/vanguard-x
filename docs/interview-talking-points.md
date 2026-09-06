@@ -6,7 +6,7 @@
 Sensor reports are ephemeral: a lost report from 500ms ago is useless because the target has moved. TCP's retransmission and head-of-line blocking would delay current reports to deliver stale ones. UDP lets the tracker work with whatever arrives, and the track lifecycle explicitly handles missing observations through the COASTING state.
 
 **What does Netty guarantee, and what must you never do on the event loop?**
-Netty guarantees that a single channel's events are processed by one thread (the event loop), eliminating the need for locks on channel state. You must never do blocking I/O, heavy computation, or synchronized waits on the event loop -- that blocks all other channels sharing it. In Vanguard, the handler decodes Protobuf, validates fields, and offers to a bounded queue. The EKF work runs on a separate worker pool.
+Netty guarantees that a single channel's events are processed by one thread (the event loop), eliminating the need for locks on channel state. You must never do blocking I/O, heavy computation, or synchronized waits on the event loop -- that blocks all other channels sharing it. In Vanguard, the handler decodes Protobuf, validates fields, and offers to a bounded queue. The downstream EKF and association work runs outside the Netty event loop in the dedicated Kafka tracking consumer thread.
 
 ## Estimation
 
@@ -33,10 +33,10 @@ The consumer group detects the missing heartbeat after session.timeout.ms. Kafka
 ## Performance
 
 **Why did the fixed worker pool or virtual-thread configuration win?**
-[Fill in after ADR-003 is completed with measured results.] The key insight is that the tracking pipeline's hot path is CPU-bound (matrix multiplication, distance computation), not I/O-bound. Virtual threads provide no inherent speedup for CPU-bound work -- their advantage is in reducing the cost of blocking I/O.
+I do not claim a fixed-pool or virtual-thread winner yet. The current implementation processes each Kafka batch synchronously in its dedicated tracking-consumer thread. The executor comparison remains a measured design question rather than an assumed optimization, because the tracking hot path is primarily CPU-bound. The key insight is that the tracking pipeline's hot path is CPU-bound (matrix multiplication, distance computation), not I/O-bound. Virtual threads provide no inherent speedup for CPU-bound work -- their advantage is in reducing the cost of blocking I/O.
 
 **Where does the system saturate and what metric tells you first?**
-[Fill in after the performance campaign.] Typically queue depth is the leading indicator: it grows before packets are dropped and before latency degrades significantly.
+The frozen benchmark does not claim one artificial saturation threshold. Indexed throughput declines from 35,728 reports/s at 50 targets to 9,771 reports/s at 1,000 targets. At 200 targets, measured in-process tracking latency is p50 16.74 ms, p95 23.92 ms, and p99 37.72 ms. In the current implementation, sustained Kafka consumer lag is the clearest leading saturation signal because backlog appears before outright packet loss. If I later introduce a bounded worker executor, queue depth becomes another leading signal. Typically queue depth is the leading indicator: it grows before packets are dropped and before latency degrades significantly.
 
 **How do you know the filter improved tracking rather than merely smoothing the path?**
 By comparing EKF position RMSE against raw single-sensor observation RMSE on the same ground-truth trajectory. If the filter is working correctly, its RMSE is lower because it combines information from multiple sensors and uses the motion model to predict through gaps. If the filter were just smoothing, it would add lag without reducing error.
@@ -44,7 +44,7 @@ By comparing EKF position RMSE against raw single-sensor observation RMSE on the
 ## What would you redesign for production?
 
 - TLS everywhere (DTLS for UDP, Kafka SSL, Redis TLS)
-- IMM (interacting multiple model) for maneuvering targets
+- Promote the implemented and held-out-evaluated IMM estimator into the default full-system tracker after rerunning and freezing the full-system benchmark
 - JPDA or MHT for dense multi-target scenarios
 - Horizontal scaling with Kafka partitioning
 - Historical storage (TimescaleDB or similar) for post-mission analysis

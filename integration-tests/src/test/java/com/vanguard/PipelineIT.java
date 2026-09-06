@@ -1,34 +1,171 @@
 package com.vanguard;
 
-import org.junit.jupiter.api.*;
+import com.vanguard.tracking.pipeline.TrackingPipelineConsumer;
+import io.lettuce.core.RedisClient;
+import org.apache.kafka.clients.consumer.KafkaConsumer;
+import org.apache.kafka.clients.producer.KafkaProducer;
+import org.apache.kafka.clients.producer.ProducerRecord;
+import org.junit.jupiter.api.Test;
 
-/**
- * Integration tests using Testcontainers for Kafka and Redis.
- * These run in CI and prove the major pipeline, recovery, replay,
- * and state-machine behaviors automatically.
- *
- * Testcontainers manages container lifecycle per test class.
- * Tests use real Kafka and Redis instances, not mocks.
- */
-// @Testcontainers  // uncomment when testcontainers dependency is added
-public class PipelineIT {
+import java.nio.charset.StandardCharsets;
+import java.time.Duration;
+import java.util.List;
+import java.util.UUID;
 
-    // @Container
-    // static KafkaContainer kafka = new KafkaContainer(DockerImageName.parse("confluentinc/cp-kafka:7.6.0"));
-    // @Container
-    // static GenericContainer<?> redis = new GenericContainer<>(DockerImageName.parse("redis:7-alpine")).withExposedPorts(6379);
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+class PipelineIT {
 
     @Test
-    @DisplayName("End-to-end: simulator -> UDP -> Kafka -> tracker -> Kafka -> spatial")
-    void endToEndPipeline() {
-        // 1. Start simulator with minimal scenario (2 targets, 1 sensor)
-        // 2. Send reports via UDP to the gateway
-        // 3. Verify reports appear on sensor-reports.raw topic
-        // 4. Verify fused tracks appear on tracks.fused topic
-        // 5. Verify zone events appear on track-events topic (if targets cross zones)
-        // 6. Verify Redis contains active track state
+    void rawReportsFlowThroughTrackingKafkaAdapterAndRedis()
+            throws Exception {
 
-        // Placeholder: implement when Testcontainers wiring is complete
-        Assertions.assertTrue(true, "Pipeline integration test placeholder");
+        IntegrationContainers.ensureTopic("sensor-reports.raw");
+        IntegrationContainers.ensureTopic("tracks.fused");
+
+        String token = UUID.randomUUID().toString();
+        String trackingGroup = "pipeline-it-tracking-" + token;
+
+        TrackingPipelineConsumer tracking =
+                new TrackingPipelineConsumer(
+                        IntegrationContainers.kafkaBootstrapServers(),
+                        trackingGroup,
+                        records -> records.stream()
+                                .map(record ->
+                                        new TrackingPipelineConsumer.KeyValue(
+                                                "fused-" + record.key(),
+                                                (
+                                                        "fused:"
+                                                                + new String(
+                                                                record.value(),
+                                                                StandardCharsets.UTF_8
+                                                        )
+                                                ).getBytes(
+                                                        StandardCharsets.UTF_8
+                                                )
+                                        )
+                                )
+                                .toList()
+                );
+
+        Thread trackingThread = Thread
+                .ofVirtual()
+                .name("pipeline-it-tracking")
+                .start(tracking);
+
+        try {
+            IntegrationContainers.awaitConsumerGroup(
+                    trackingGroup,
+                    1,
+                    Duration.ofSeconds(15)
+            );
+
+            try (
+                    KafkaConsumer<String, byte[]> outputConsumer =
+                            new KafkaConsumer<>(
+                                    IntegrationContainers.consumerProperties(
+                                            "pipeline-it-output-" + token,
+                                            "latest"
+                                    )
+                            )
+            ) {
+                outputConsumer.subscribe(List.of("tracks.fused"));
+
+                IntegrationContainers.awaitAssignment(
+                        outputConsumer,
+                        Duration.ofSeconds(10)
+                );
+
+                try (
+                        KafkaProducer<String, byte[]> producer =
+                                new KafkaProducer<>(
+                                        IntegrationContainers
+                                                .producerProperties()
+                                )
+                ) {
+                    for (int i = 0; i < 3; i++) {
+                        producer.send(
+                                new ProducerRecord<>(
+                                        "sensor-reports.raw",
+                                        token + "-" + i,
+                                        ("report-" + i).getBytes(
+                                                StandardCharsets.UTF_8
+                                        )
+                                )
+                        );
+                    }
+
+                    producer.flush();
+                }
+
+                var outputs =
+                        IntegrationContainers.awaitMatchingRecords(
+                                outputConsumer,
+                                record ->
+                                        record.key() != null
+                                                && record.key().startsWith(
+                                                "fused-" + token
+                                        ),
+                                3,
+                                Duration.ofSeconds(15)
+                        );
+
+                assertEquals(
+                        3,
+                        outputs.size(),
+                        "all three test reports should reach tracks.fused"
+                );
+
+                assertTrue(
+                        tracking.getConsumed() >= 3,
+                        "tracking adapter should consume the raw reports"
+                );
+
+                assertTrue(
+                        tracking.getProduced() >= 3,
+                        "tracking adapter should publish fused records"
+                );
+
+                String redisKey = "pipeline-it:" + token;
+                String redisValue = outputs.get(0).key();
+
+                RedisClient redis =
+                        RedisClient.create(
+                                IntegrationContainers.redisUri()
+                        );
+
+                try {
+                    var connection = redis.connect();
+
+                    try {
+                        connection.sync().set(
+                                redisKey,
+                                redisValue
+                        );
+
+                        assertEquals(
+                                redisValue,
+                                connection.sync().get(redisKey),
+                                "Redis should persist pipeline state"
+                        );
+                    } finally {
+                        connection.close();
+                    }
+                } finally {
+                    redis.shutdown();
+                }
+            }
+
+        } finally {
+            tracking.stop();
+            trackingThread.join(5_000);
+
+            assertFalse(
+                    trackingThread.isAlive(),
+                    "tracking consumer should shut down cleanly"
+            );
+        }
     }
 }

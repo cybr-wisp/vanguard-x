@@ -1,0 +1,4 @@
+ESTIMATION_VALIDATION phase=development model=EKF position_rmse_m=11.691 nees95_coverage=0.4769 nis95_coverage=0.9412 position_samples=4800 nees_samples=4800 nis_samples=4540
+ESTIMATION_VALIDATION phase=development model=IMM position_rmse_m=10.430 nees95_coverage=0.8715 nis95_coverage=0.9498 position_samples=4800 nees_samples=4800 nis_samples=4540
+ESTIMATION_VALIDATION phase=validation model=EKF position_rmse_m=11.723 nees95_coverage=0.4874 nis95_coverage=0.9388 position_samples=7200 nees_samples=7200 nis_samples=6810
+ESTIMATION_VALIDATION phase=validation model=IMM position_rmse_m=10.439 nees95_coverage=0.8810 nis95_coverage=0.9438 position_samples=7200 nees_samples=7200 nis_samples=6810
