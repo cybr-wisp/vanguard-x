@@ -128,10 +128,10 @@ public class ExtendedKalmanFilter {
             MeasurementModel sensorModel
     ) {
         SimpleMatrix hx =
-                sensorModel.h(getState());
+                sensorModel.h(state);
 
         SimpleMatrix H =
-                sensorModel.jacobian(getState());
+                sensorModel.jacobian(state);
 
         SimpleMatrix R =
                 sensorModel.noiseCovariance();
@@ -148,7 +148,7 @@ public class ExtendedKalmanFilter {
         );
 
         SimpleMatrix S =
-                H.mult(getCovariance())
+                H.mult(P)
                         .mult(H.transpose())
                         .plus(R);
 
@@ -222,6 +222,18 @@ public class ExtendedKalmanFilter {
                 ).scale(0.5);
     }
 
+    /**
+     * Immutable-at-creation filter snapshot for same-timestamp association.
+     *
+     * The constructor performs the defensive copies exactly once.
+     */
+    public ExtendedKalmanFilter snapshot() {
+        return new ExtendedKalmanFilter(
+                state,
+                P,
+                motionModel
+        );
+    }
     public SimpleMatrix getState() {
         return state.copy();
     }

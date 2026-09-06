@@ -252,11 +252,7 @@ public class TrackManager {
         ExtendedKalmanFilter source = track.getEkf();
 
         ExtendedKalmanFilter snapshot =
-                new ExtendedKalmanFilter(
-                        source.getState(),
-                        source.getCovariance(),
-                        motionModel
-                );
+                source.snapshot();
 
         return new Candidate(
                 track.getTrackId(),

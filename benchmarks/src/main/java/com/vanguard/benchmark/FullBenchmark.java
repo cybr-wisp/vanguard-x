@@ -27,15 +27,15 @@ public class FullBenchmark {
         runPacketLoss();
 
         // Performance: BEFORE and AFTER spatial index
-        System.out.println("--- THROUGHPUT (before spatial index) ---");
-        runThroughput(false);
-        System.out.println("--- THROUGHPUT (after spatial index) ---");
-        runThroughput(true);
+        System.out.println("--- THROUGHPUT (coarse spatial grid: 2000 m) ---");
+        runThroughput(2_000.0);
+        System.out.println("--- THROUGHPUT (operational spatial grid: 300 m) ---");
+        runThroughput(300.0);
 
-        System.out.println("--- LATENCY (before spatial index) ---");
-        runLatency(false);
-        System.out.println("--- LATENCY (after spatial index) ---");
-        runLatency(true);
+        System.out.println("--- LATENCY (coarse spatial grid: 2000 m) ---");
+        runLatency(2_000.0);
+        System.out.println("--- LATENCY (operational spatial grid: 300 m) ---");
+        runLatency(300.0);
 
         // Elite metrics
         runCovarianceHonesty();
@@ -191,13 +191,15 @@ public class FullBenchmark {
     }
 
     // 4. Throughput (with/without spatial index)
-    static void runThroughput(boolean useSpatialIndex) {
+    static void runThroughput(double gridCellSize) {
         int[] targets = {50, 200, 500, 1000};
         int warmup = 100, measured = 500;
         for (int n : targets) {
-            DataAssociator assoc = useSpatialIndex
-                    ? new DataAssociator(new MahalanobisGate(9.21), 300.0)
-                    : new DataAssociator(new MahalanobisGate(9.21));
+            DataAssociator assoc =
+                    new DataAssociator(
+                            new MahalanobisGate(9.21),
+                            gridCellSize
+                    );
             TrackManager mgr = new TrackManager(assoc, MOTION, 3, 3, 8, 10000, 100);
             MeasurementModel mm = new MeasurementModel(0, 0, 50, 0.01);
             Random rng = new Random(42);
@@ -215,11 +217,13 @@ public class FullBenchmark {
     }
 
     // 5. Latency (with/without spatial index)
-    static void runLatency(boolean useSpatialIndex) {
+    static void runLatency(double gridCellSize) {
         int n = 200, warmup = 200, measured = 2000;
-        DataAssociator assoc = useSpatialIndex
-                ? new DataAssociator(new MahalanobisGate(9.21), 300.0)
-                : new DataAssociator(new MahalanobisGate(9.21));
+        DataAssociator assoc =
+                    new DataAssociator(
+                            new MahalanobisGate(9.21),
+                            gridCellSize
+                    );
         TrackManager mgr = new TrackManager(assoc, MOTION, 3, 3, 8, 10000, 100);
         MeasurementModel mm = new MeasurementModel(0, 0, 50, 0.01);
         Random rng = new Random(42);

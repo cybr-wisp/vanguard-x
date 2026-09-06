@@ -42,11 +42,51 @@ public class MahalanobisGate {
      * @param innovationCov   2x2 innovation covariance S = H*P*H^T + R
      * @return squared Mahalanobis distance d^2
      */
-    public double squaredDistance(SimpleMatrix innovation, SimpleMatrix innovationCov) {
-        SimpleMatrix sInv = innovationCov.invert();
-        // d^2 = y^T * S^{-1} * y  (scalar result from 1x2 * 2x2 * 2x1)
-        SimpleMatrix result = innovation.transpose().mult(sInv).mult(innovation);
-        return result.get(0, 0);
+    public double squaredDistance(
+            SimpleMatrix innovation,
+            SimpleMatrix innovationCov
+    ) {
+        /*
+         * Runtime association uses a 2D [range, bearing] innovation.
+         *
+         * For a 2x2 covariance, compute y^T S^-1 y analytically instead
+         * of allocating and inverting an EJML matrix for every candidate.
+         */
+        double y0 = innovation.get(0, 0);
+        double y1 = innovation.get(1, 0);
+
+        double s00 = innovationCov.get(0, 0);
+        double s01 = innovationCov.get(0, 1);
+        double s10 = innovationCov.get(1, 0);
+        double s11 = innovationCov.get(1, 1);
+
+        double determinant =
+                s00 * s11 -
+                        s01 * s10;
+
+        /*
+         * S should be positive definite. Preserve the general matrix
+         * implementation as a numerical fallback for a pathological
+         * near-singular covariance.
+         */
+        if (!Double.isFinite(determinant)
+                || Math.abs(determinant) < 1e-12) {
+
+            SimpleMatrix inverse =
+                    innovationCov.invert();
+
+            return innovation.transpose()
+                    .mult(inverse)
+                    .mult(innovation)
+                    .get(0, 0);
+        }
+
+        return (
+                s11 * y0 * y0
+                        - s01 * y0 * y1
+                        - s10 * y0 * y1
+                        + s00 * y1 * y1
+        ) / determinant;
     }
 
     /**
