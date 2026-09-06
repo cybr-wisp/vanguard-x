@@ -2,7 +2,7 @@
 
 ## Status
 
-Open experiment â€” no production winner is claimed.
+Open experiment — no production winner is claimed.
 
 ## Context
 
