@@ -53,6 +53,8 @@ The ordering guarantee Vanguard relies on is:
 
 > Reports for one sensor remain ordered relative to other reports carrying that same key.
 
+The UDP gateway suppresses duplicate sensor sequence numbers before records enter Kafka. This is ingestion-boundary deduplication only; it is not an end-to-end exactly-once guarantee.
+
 ### `tracks.fused`
 
 Fused-track updates are keyed by `track_id`.
@@ -162,14 +164,6 @@ A stronger delivery contract would require deliberate offset management and/or K
 
 ---
 
-## Gateway deduplication
-
-The UDP gateway maintains per-sensor sequencing information before validated reports enter Kafka.
-
-This provides duplicate suppression at the ingestion boundary for repeated sensor sequence numbers.
-
-Gateway deduplication should not be interpreted as a general exactly-once guarantee for all downstream Kafka processing.
-
 ---
 
 ## Retention and compaction
@@ -250,14 +244,10 @@ Partition counts should not be changed solely to increase apparent parallelism.
 
 ## Consequences
 
-- per-sensor report ordering is preserved for a stable `sensor_id` key
-- per-track fused updates retain an explicit ordering boundary
-- spatial-event ordering is scoped to one track/zone pair
-- consumer groups allow tracking and spatial processing to scale independently
-- Kafka partitions provide bounded stage-level parallelism
-- consumer rebalancing provides partition reassignment after consumer failure
-- Kafka provides a replayable pipeline boundary within the configured retention window
-- the current implementation does not claim exactly-once processing
-- log compaction is not currently required or assumed
-- topic keys, partition counts, and retention policy are treated as part of the system interface
-- changes to keys, partition counts, or retention require review of ordering, replay, and recovery assumptions
+- ordering is guaranteed only within each documented Kafka key/partition scope
+- tracking and spatial processing use independent consumer groups and can scale independently
+- partition counts bound useful consumer parallelism and are therefore architecture decisions
+- `sensor-reports.raw` remains replayable only while required offsets remain within the configured retention window
+- the reference deployment does not claim transactional or end-to-end exactly-once processing
+- retention and compaction are explicit deployment policies; `tracks.fused` is a candidate for `compact,delete` but does not currently rely on compaction
+- changes to keys, partition counts, retention, or offset semantics require review of ordering, replay, and recovery assumptions
