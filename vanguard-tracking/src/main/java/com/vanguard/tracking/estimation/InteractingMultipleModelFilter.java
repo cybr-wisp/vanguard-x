@@ -234,17 +234,55 @@ public class InteractingMultipleModelFilter
             SimpleMatrix S =
                     innovation[1];
 
-            double quadratic =
-                    y.transpose()
-                            .mult(S.invert())
-                            .mult(y)
-                            .get(0, 0);
+            double logPrior =
+                    Math.log(
+                            Math.max(
+                                    modeProbabilities[i],
+                                    1e-300
+                            )
+                    );
 
             double determinant =
-                    Math.max(
-                            S.determinant(),
-                            1e-300
-                    );
+                    S.determinant();
+
+            if (!Double.isFinite(determinant)
+                    || determinant <= 0.0) {
+
+                logWeights[i] =
+                        logPrior - 1e12;
+
+                continue;
+            }
+
+            final double quadratic;
+
+            try {
+                SimpleMatrix solved =
+                        solveChecked(
+                                S,
+                                y,
+                                "IMM innovation covariance"
+                        );
+
+                quadratic =
+                        y.transpose()
+                                .mult(solved)
+                                .get(0, 0);
+            } catch (IllegalStateException ex) {
+                logWeights[i] =
+                        logPrior - 1e12;
+
+                continue;
+            }
+
+            if (!Double.isFinite(quadratic)
+                    || quadratic < 0.0) {
+
+                logWeights[i] =
+                        logPrior - 1e12;
+
+                continue;
+            }
 
             double logLikelihood =
                     -0.5 * (
