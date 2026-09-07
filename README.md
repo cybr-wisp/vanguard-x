@@ -46,7 +46,7 @@ Vanguard fuses asynchronous, noisy range/bearing reports into a single track pic
 
 ### 01. Measured results
 
-All values below are measured results from the frozen benchmark campaign **(fixed workload, fixed configuration, and committed raw outputs)**, not design targets.
+All values below are from the frozen benchmark campaign with a fixed workload, fixed configuration, and committed raw outputs.
 
 | Category | Metric | Result |
 |---|---|---:|
@@ -77,98 +77,11 @@ Raw benchmark outputs are committed under [`benchmarks/results/optimized-three-r
 
 ### 02. Architecture
 
-#### Simulation
-The world simulator generates deterministic target trajectories and feeds them through three independent sensor models, each with configurable range noise, bearing bias, and update rate. A network impairment layer applies packet loss, jitter, and reordering before reports hit the UDP ingress, so the tracking pipeline never sees clean data.
-**All randomness is seeded. The same seed produces the same measurement sequence, which is what makes replay verification and frozen benchmarks possible.**
-
-#### Operator UI
-The React/TypeScript frontend connects over WebSocket and renders:
-- **Tactical map** -- live track positions, heading vectors, and covariance uncertainty ellipses on a MapLibre basemap
-- **Event panel** -- stateful geofence transitions as they fire
-- **Analytics dashboard** -- ingest throughput, active track count, end-to-end latency, Kafka lag, and component health
-- **Track inspector** -- per-track state, lifecycle phase, and estimation metadata
-
-Live telemetry is kept visually separate from frozen benchmark results so transient runtime values are never confused with measured performance.
-
-<p align="center">
-  <img src="docs/assets/vanguard_overview.png" width="49%" alt="Overview">
-  <img src="docs/assets/vanguard-analytics.png" width="49%" alt="Live Analytics">
-</p>
-<p align="center">
-  <img src="docs/assets/vanguard-benchmarks.png" width="49%" alt="Benchmarks">
-  <img src="docs/assets/vanguard-events.png" width="49%" alt="Events">
-</p>
-
-
-----
-
-
-### 02. Architecture
-
 Vanguard is organized around explicit transport, tracking, state, spatial-event, and presentation boundaries.
 
 Kafka provides replayable stream boundaries between ingestion and processing. Redis holds current track state for low-latency access. The Spring Boot API exposes live track, event, and health streams to the frontend without embedding tracking logic in the presentation layer.
 
 ![Vanguard-X architecture](docs/architecture/architecture_diagram.png)
-
-```text
-World Simulator
-    |
-    v
-Synthetic Sensors A / B / C
-(noise + bias + asynchronous reports)
-    |
-    v
-Network Impairments
-(loss + jitter + reordering)
-    |
-    v
-UDP + Protobuf
-    |
-    v
-Netty UDP Gateway
-(validation -> sequencing -> deduplication)
-    |
-    v
-Kafka: sensor-reports.raw
-    |
-    v
-Tracking Processor
-(event-time ordering
- -> Mahalanobis association
- -> EKF
- -> track lifecycle)
-    |
-    +-----------> Kafka: tracks.fused
-    |                    |
-    |                    v
-    |              Spatial Engine
-    |            geofence state machine
-    |                    |
-    |                    v
-    |             Kafka: track-events
-    |                    |
-    |                    |
-    +-----------> Redis  |
-                 live    |
-                 state   |
-                    \    /
-                     \  /
-                      vv
-               Spring Boot API
-               REST + WebSocket
-                      |
-                      v
-                Vanguard UI
-              React + MapLibre
-```
-
-Supporting infrastructure:
-
-- Prometheus -> runtime metrics
-- Grafana -> dashboards
-- CodeQL -> static analysis
-- CycloneDX -> SBOM generation
 
 The reference Docker Compose deployment packages the backend runtime into `vanguard-api`, while the Maven modules preserve the internal subsystem boundaries.
 
@@ -199,6 +112,12 @@ Live telemetry is kept visually separate from frozen benchmark results so transi
 </p>
 
 ---
+
+
+----
+
+
+
 
 ## How sensor fusion works
 
