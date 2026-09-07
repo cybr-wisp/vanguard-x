@@ -22,6 +22,15 @@ Vanguard fuses asynchronous, noisy range/bearing reports into a single track pic
 
 > **Scope:** Vanguard-X is an educational, simulated, unclassified software project. Sensors, trajectories, measurements, and geofences are synthetic. It is not an operational combat, targeting, or weapon-control system.
 
+<p align="center">
+  <a href="https://skillicons.dev">
+    <img src="https://skillicons.dev/icons?i=java,spring,kafka,redis,docker,react,ts,prometheus,grafana,nginx&theme=dark" alt="Tech stack" />
+  </a>
+</p>
+<p align="center">
+  <sub>+ Netty · Protobuf · MapLibre · Micrometer · CycloneDX</sub>
+</p>
+
 ---
  
 ### Contents
