@@ -1,4 +1,4 @@
-<h1 align="center">V A N G U A R D - X</h1>
+<h1 align="center">VANGUARD-X</h1>
 
 <p align="center">
   <strong>Three imperfect sensors observe the same airspace and disagree.</strong><br>
@@ -110,6 +110,7 @@ Live telemetry is kept visually separate from frozen benchmark results so transi
   <img src="docs/assets/vanguard-benchmarks.png" width="49%" alt="Benchmarks">
   <img src="docs/assets/vanguard-events.png" width="49%" alt="Events">
 </p>
+
 https://github.com/user-attachments/assets/4a31fb7a-12ea-4c3e-a767-808e7b79ae57
  
 ---
