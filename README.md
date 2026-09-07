@@ -1,54 +1,47 @@
-# v a n g u a r d - x 
+<h1 align="center">V A N G U A R D - X</h1>
 
-<!--
-HERO DEMO
+<p align="center">
+  <strong>Three imperfect sensors observe the same airspace and disagree.</strong><br>
+Vanguard fuses asynchronous, noisy range/bearing reports into a single track picture, raises stateful geofence events, and preserves track identity through missed detections and replayable Kafka boundaries.</p>
 
-Record the final 12–15 second demo and save it as:
+<p align="center">
+  <a href="https://github.com/cybr-wisp/vanguard-x/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/cybr-wisp/vanguard-x/ci.yml?branch=main&label=CI&style=flat-square&logo=githubactions&logoColor=white" alt="CI"></a>
+  <img src="https://img.shields.io/badge/Java-21-ED8B00?style=flat-square&logo=openjdk&logoColor=white" alt="Java 21">
+  <img src="https://img.shields.io/badge/Kafka-3.7-231F20?style=flat-square&logo=apachekafka&logoColor=white" alt="Kafka">
+  <img src="https://img.shields.io/badge/EKF-Estimator-0F766E?style=flat-square" alt="Estimator">
+  <img src="https://img.shields.io/badge/Spring%20Boot-3.3-6DB33F?style=flat-square&logo=springboot&logoColor=white" alt="Spring Boot">
+  <img src="https://img.shields.io/badge/Redis-7-DC382D?style=flat-square&logo=redis&logoColor=white" alt="Redis">
+  <img src="https://img.shields.io/badge/Protobuf-3-4285F4?style=flat-square&logo=google&logoColor=white" alt="Protobuf">
+  <img src="https://img.shields.io/badge/Docker-Compose-2496ED?style=flat-square&logo=docker&logoColor=white" alt="Docker">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue?style=flat-square" alt="MIT License"></a>
+</p>
 
-docs/figures/demo.gif
-
-Then replace this comment with:
-
-![Vanguard-X live multi-sensor tracking demo](docs/figures/demo.gif)
--->
-
-**Three imperfect sensors observe the same airspace and disagree. Vanguard turns asynchronous, noisy range/bearing reports into a single fused track picture, raises stateful geofence events, and preserves track identity through missed observations and replayable infrastructure boundaries.**
-
-[![CI](https://github.com/cybr-wisp/vanguard-x/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/cybr-wisp/vanguard-x/actions/workflows/ci.yml)
-![Java 21](https://img.shields.io/badge/Java-21-ED8B00?logo=openjdk&logoColor=white)
-![Kafka](https://img.shields.io/badge/Apache%20Kafka-3.7-231F20?logo=apachekafka&logoColor=white)
-![Estimator](https://img.shields.io/badge/Estimator-EKF-0F766E)
-![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.3-6DB33F?logo=springboot&logoColor=white)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-
-
-![Vanguard-X demo](docs/assets/vanguard-1.gif)
-
-Vanguard-X is a Java 21 multi-sensor tracking and state-estimation system built around UDP telemetry, Protobuf contracts, Kafka event streams, an Extended Kalman Filter, Redis live state, stateful geofencing, and a React/MapLibre operational UI.
+<p align="center">
+  <img src="docs/assets/vanguard-1.gif" alt="Vanguard-X live multi-sensor tracking demo" width="720">
+</p>
 
 > **Scope:** Vanguard-X is an educational, simulated, unclassified software project. Sensors, trajectories, measurements, and geofences are synthetic. It is not an operational combat, targeting, or weapon-control system.
 
 ---
+### Contents:
+- [01. Measured results](#measured-results)
+- [02. Architecture](#architecture)
+  - [Simulation](#simulation)
+  - [Operator UI](#operator-ui)
+- [03. How sensor fusion works](#how-sensor-fusion-works)
+- [04. Track lifecycle and uncertainty](#track-lifecycle-and-uncertainty)
+- [05. Failure modes and recovery evidence](#failure-modes-and-recovery-evidence)
+- [06. Requirements traceability](#requirements-traceability)
+- [07. Sensor interface](#sensor-interface)
+- [08. Module map](#module-map)
+- [09. Benchmark methodology](#benchmark-methodology)
+- [10. Verification and CI](#verification-and-ci)
+- [11. Observability](#observability)
+- [12. Documentation](#documentation)
+- [13. Known limitations](#known-limitations)
+- [14. Quick start](#quick-start)
+- [15. License](#license)
 
-## Contents
-
-- [Measured results](#measured-results)
-- [Architecture](#architecture)
-- [How sensor fusion works](#how-sensor-fusion-works)
-- [Track lifecycle and uncertainty](#track-lifecycle-and-uncertainty)
-- [Failure modes and recovery evidence](#failure-modes-and-recovery-evidence)
-- [Requirements traceability](#requirements-traceability)
-- [Sensor interface](#sensor-interface)
-- [Module map](#module-map)
-- [Benchmark methodology](#benchmark-methodology)
-- [Verification and CI](#verification-and-ci)
-- [Observability](#observability)
-- [Documentation](#documentation)
-- [Known limitations](#known-limitations)
-- [Quick start](#quick-start)
-- [License](#license)
-
----
 
 ## Measured results
 
@@ -82,6 +75,40 @@ Raw benchmark outputs are committed under [`benchmarks/results/optimized-three-r
 Full methodology, ablations, and limitations are documented in [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md).
 
 ---
+## Simulation
+
+The world simulator generates deterministic target trajectories
+and feeds them through three independent sensor models, each with
+configurable range noise, bearing bias, and update rate. A network
+impairment layer applies packet loss, jitter, and reordering
+before reports hit the UDP ingress, so the tracking pipeline never
+sees clean data.
+
+All randomness is seeded. The same seed produces the same
+measurement sequence, which is what makes replay verification
+and frozen benchmarks possible.
+
+## Operator UI
+
+The React/TypeScript frontend connects over WebSocket and renders:
+
+- **Tactical map** -- live track positions, heading vectors, and
+  covariance uncertainty ellipses on a MapLibre basemap
+- **Event panel** -- stateful geofence transitions as they fire
+- **Analytics dashboard** -- ingest throughput, active track count,
+  end-to-end latency, Kafka lag, and component health
+- **Track inspector** -- per-track state, lifecycle phase, and
+  estimation metadata
+
+Live telemetry is kept visually separate from frozen benchmark
+results so transient runtime values are never confused with
+measured performance.
+
+
+----
+
+
+
 
 ## Architecture
 
