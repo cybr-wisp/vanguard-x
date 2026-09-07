@@ -519,6 +519,20 @@ npm run build
 
 ---
 
+## Built with
+
+<p align="center">
+  <a href="https://skillicons.dev">
+    <img src="https://skillicons.dev/icons?i=java,spring,kafka,redis,docker,react,ts,prometheus,grafana,nginx&theme=dark" alt="Tech stack" />
+  </a>
+</p>
+<p align="center">
+  <sub>+ Netty · Protobuf · MapLibre · Micrometer · CycloneDX</sub>
+</p>
+
+
+
+
 ## License
 
 Released under the [MIT License](LICENSE).
