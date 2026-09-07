@@ -84,9 +84,19 @@ public class ExtendedKalmanFilter {
                         .mult(H.transpose())
                         .plus(R);
 
+        SimpleMatrix pHt =
+                P.mult(H.transpose());
+
+        /*
+         * Solve S * X = (P H^T)^T rather than explicitly forming S^-1.
+         * Since S is symmetric, K = X^T.
+         */
         SimpleMatrix K =
-                P.mult(H.transpose())
-                        .mult(S.invert());
+                solveChecked(
+                        S,
+                        pHt.transpose(),
+                        "innovation covariance"
+                ).transpose();
 
         state =
                 state.plus(
@@ -180,9 +190,15 @@ public class ExtendedKalmanFilter {
         SimpleMatrix S =
                 innovation[1];
 
+        SimpleMatrix solved =
+                solveChecked(
+                        S,
+                        y,
+                        "innovation covariance"
+                );
+
         return y.transpose()
-                .mult(S.invert())
-                .mult(y)
+                .mult(solved)
                 .get(0, 0);
     }
 
@@ -207,12 +223,75 @@ public class ExtendedKalmanFilter {
                         truthState
                 );
 
+        SimpleMatrix covariance =
+                getCovariance();
+
+        SimpleMatrix solved =
+                solveChecked(
+                        covariance,
+                        error,
+                        "state covariance"
+                );
+
         return error.transpose()
-                .mult(
-                        getCovariance().invert()
-                )
-                .mult(error)
+                .mult(solved)
                 .get(0, 0);
+    }
+    /**
+     * Solve A X = B without explicitly forming A^-1.
+     *
+     * Covariance matrices used here are expected to be positive definite.
+     * Fail explicitly if the matrix or resulting solution is numerically
+     * invalid rather than propagating NaN/Inf state through the tracker.
+     */
+    protected static SimpleMatrix solveChecked(
+            SimpleMatrix matrix,
+            SimpleMatrix rhs,
+            String context
+    ) {
+        double determinant =
+                matrix.determinant();
+
+        if (!Double.isFinite(determinant)
+                || determinant <= 0.0) {
+            throw new IllegalStateException(
+                    context +
+                            " is singular or not positive definite"
+            );
+        }
+
+        final SimpleMatrix solution;
+
+        try {
+            solution =
+                    matrix.solve(rhs);
+        } catch (RuntimeException ex) {
+            throw new IllegalStateException(
+                    "Failed to solve " + context,
+                    ex
+            );
+        }
+
+        for (int row = 0;
+             row < solution.numRows();
+             row++) {
+
+            for (int col = 0;
+                 col < solution.numCols();
+                 col++) {
+
+                if (!Double.isFinite(
+                        solution.get(row, col)
+                )) {
+                    throw new IllegalStateException(
+                            context +
+                                    " solve produced non-finite values"
+                    );
+                }
+            }
+        }
+
+        return solution;
     }
 
     private void enforceSymmetry() {
@@ -229,8 +308,8 @@ public class ExtendedKalmanFilter {
      */
     public ExtendedKalmanFilter snapshot() {
         return new ExtendedKalmanFilter(
-                state,
-                P,
+                getState(),
+                getCovariance(),
                 motionModel
         );
     }
