@@ -42,8 +42,9 @@ Vanguard fuses asynchronous, noisy range/bearing reports into a single track pic
 - [14. Quick start](#quick-start)
 - [15. License](#license)
 
+----
 
-## Measured results
+### 01. Measured results
 
 All values below are measured results from the frozen benchmark campaign **(fixed workload, fixed configuration, and committed raw outputs)**, not design targets.
 
@@ -70,67 +71,45 @@ All values below are measured results from the frozen benchmark campaign **(fixe
 
 > **Latency scope:** the 13.49 / 18.45 / 20.73 ms figures measure **in-process tracking workload latency**, not full UDP-to-browser end-to-end latency.
 
-Raw benchmark outputs are committed under [`benchmarks/results/optimized-three-run/`](benchmarks/results/optimized-three-run/).
-
-Full methodology, ablations, and limitations are documented in [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md).
+Raw benchmark outputs are committed under [`benchmarks/results/optimized-three-run/`](benchmarks/results/optimized-three-run/). Full methodology, ablations, and limitations are documented in [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md).
 
 ---
-## Simulation
 
-The world simulator generates deterministic target trajectories
-and feeds them through three independent sensor models, each with
-configurable range noise, bearing bias, and update rate. A network
-impairment layer applies packet loss, jitter, and reordering
-before reports hit the UDP ingress, so the tracking pipeline never
-sees clean data.
+### 02. Architecture
 
-All randomness is seeded. The same seed produces the same
-measurement sequence, which is what makes replay verification
-and frozen benchmarks possible.
+#### Simulation
+The world simulator generates deterministic target trajectories and feeds them through three independent sensor models, each with configurable range noise, bearing bias, and update rate. A network impairment layer applies packet loss, jitter, and reordering before reports hit the UDP ingress, so the tracking pipeline never sees clean data.
+**All randomness is seeded. The same seed produces the same measurement sequence, which is what makes replay verification and frozen benchmarks possible.**
 
-## Operator UI
-
+#### Operator UI
 The React/TypeScript frontend connects over WebSocket and renders:
-
-- **Tactical map** -- live track positions, heading vectors, and
-  covariance uncertainty ellipses on a MapLibre basemap
+- **Tactical map** -- live track positions, heading vectors, and covariance uncertainty ellipses on a MapLibre basemap
 - **Event panel** -- stateful geofence transitions as they fire
-- **Analytics dashboard** -- ingest throughput, active track count,
-  end-to-end latency, Kafka lag, and component health
-- **Track inspector** -- per-track state, lifecycle phase, and
-  estimation metadata
+- **Analytics dashboard** -- ingest throughput, active track count, end-to-end latency, Kafka lag, and component health
+- **Track inspector** -- per-track state, lifecycle phase, and estimation metadata
 
-Live telemetry is kept visually separate from frozen benchmark
-results so transient runtime values are never confused with
-measured performance.
+Live telemetry is kept visually separate from frozen benchmark results so transient runtime values are never confused with measured performance.
+
+<p align="center">
+  <img src="docs/assets/vanguard_overview.png" width="49%" alt="Overview">
+  <img src="docs/assets/vanguard-analytics.png" width="49%" alt="Live Analytics">
+</p>
+<p align="center">
+  <img src="docs/assets/vanguard-benchmarks.png" width="49%" alt="Benchmarks">
+  <img src="docs/assets/vanguard-events.png" width="49%" alt="Events">
+</p>
 
 
 ----
 
 
-
-
-## Architecture
+### 02. Architecture
 
 Vanguard is organized around explicit transport, tracking, state, spatial-event, and presentation boundaries.
 
 Kafka provides replayable stream boundaries between ingestion and processing. Redis holds current track state for low-latency access. The Spring Boot API exposes live track, event, and health streams to the frontend without embedding tracking logic in the presentation layer.
 
-<!--
-ARCHITECTURE DIAGRAM
-
-Save the final architecture image as:
-
-docs/figures/architecture.png
-
-Then uncomment:
-
-![Vanguard-X architecture](docs/figures/architecture.png)
--->
-
 ![Vanguard-X architecture](docs/architecture/architecture_diagram.png)
-
-The logical processing pipeline is:
 
 ```text
 World Simulator
@@ -192,6 +171,32 @@ Supporting infrastructure:
 - CycloneDX -> SBOM generation
 
 The reference Docker Compose deployment packages the backend runtime into `vanguard-api`, while the Maven modules preserve the internal subsystem boundaries.
+
+#### Simulation
+
+The world simulator generates deterministic target trajectories and feeds them through three independent sensor models, each with configurable range noise, bearing bias, and update rate. A network impairment layer applies packet loss, jitter, and reordering before reports hit the UDP ingress, so the tracking pipeline never sees clean data.
+
+**All randomness is seeded. The same seed produces the same measurement sequence, which is what makes replay verification and frozen benchmarks possible.**
+
+#### Operator UI
+
+The React/TypeScript frontend connects over WebSocket and renders:
+
+- **Tactical map** - live track positions, heading vectors, and covariance uncertainty ellipses on a MapLibre basemap
+- **Event panel** - stateful geofence transitions as they fire
+- **Analytics dashboard** - ingest throughput, active track count, end-to-end latency, Kafka lag, and component health
+- **Track inspector** - per-track state, lifecycle phase, and estimation metadata
+
+Live telemetry is kept visually separate from frozen benchmark results so transient runtime values are never confused with measured performance.
+
+<p align="center">
+  <img src="docs/assets/vanguard_overview.png" width="49%" alt="Overview">
+  <img src="docs/assets/vanguard-analytics.png" width="49%" alt="Live Analytics">
+</p>
+<p align="center">
+  <img src="docs/assets/vanguard-benchmarks.png" width="49%" alt="Benchmarks">
+  <img src="docs/assets/vanguard-events.png" width="49%" alt="Events">
+</p>
 
 ---
 
