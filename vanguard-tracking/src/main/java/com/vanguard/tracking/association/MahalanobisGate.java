@@ -52,41 +52,39 @@ public class MahalanobisGate {
          * For a 2x2 covariance, compute y^T S^-1 y analytically instead
          * of allocating and inverting an EJML matrix for every candidate.
          */
-        double y0 = innovation.get(0, 0);
-        double y1 = innovation.get(1, 0);
-
-        double s00 = innovationCov.get(0, 0);
-        double s01 = innovationCov.get(0, 1);
-        double s10 = innovationCov.get(1, 0);
-        double s11 = innovationCov.get(1, 1);
-
         double determinant =
-                s00 * s11 -
-                        s01 * s10;
+                innovationCov.determinant();
 
         /*
-         * S should be positive definite. Preserve the general matrix
-         * implementation as a numerical fallback for a pathological
-         * near-singular covariance.
+         * Innovation covariance should be positive definite. A singular,
+         * indefinite, or otherwise numerically unusable covariance causes
+         * the candidate association to fail closed.
          */
         if (!Double.isFinite(determinant)
-                || Math.abs(determinant) < 1e-12) {
-
-            SimpleMatrix inverse =
-                    innovationCov.invert();
-
-            return innovation.transpose()
-                    .mult(inverse)
-                    .mult(innovation)
-                    .get(0, 0);
+                || determinant <= 0.0) {
+            return Double.POSITIVE_INFINITY;
         }
 
-        return (
-                s11 * y0 * y0
-                        - s01 * y0 * y1
-                        - s10 * y0 * y1
-                        + s00 * y1 * y1
-        ) / determinant;
+        try {
+            SimpleMatrix solved =
+                    innovationCov.solve(
+                            innovation
+                    );
+
+            double distanceSquared =
+                    innovation.transpose()
+                            .mult(solved)
+                            .get(0, 0);
+
+            if (!Double.isFinite(distanceSquared)
+                    || distanceSquared < 0.0) {
+                return Double.POSITIVE_INFINITY;
+            }
+
+            return distanceSquared;
+        } catch (RuntimeException ex) {
+            return Double.POSITIVE_INFINITY;
+        }
     }
 
     /**
