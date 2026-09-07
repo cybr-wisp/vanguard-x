@@ -111,78 +111,61 @@ Live telemetry is kept visually separate from frozen benchmark results so transi
   <img src="docs/assets/vanguard-events.png" width="49%" alt="Events">
 </p>
 
+<p align="center">
+  <img src="docs/assets/vanguard-benchmarks.png" width="49%" alt="Benchmarks">
+  <img src="docs/assets/vanguard-events.png" width="49%" alt="Events">
+</p>
+
+https://github.com/user-attachments/assets/4a31fb7a-12ea-4c3e-a767-808e7b79ae57
+
 ---
-
-
-----
-
-
-
-
-## How sensor fusion works
-
-The runtime tracker uses a 2D constant-velocity Extended Kalman Filter with state
-
-```
-x = [px, py, vx, vy]^T
-```
-
-Each sensor reports a nonlinear range/bearing observation from a known sensor position.
-
+---
+ 
+### 03. How sensor fusion works
+ 
+The runtime tracker uses a 2D constant-velocity Extended Kalman Filter with state `x = [px, py, vx, vy]^T`. Each sensor reports a nonlinear range/bearing observation from a known sensor position.
+ 
 For each observation cycle, Vanguard:
-
+ 
 1. **Predicts** alive tracks to the observation timestamp using the motion model.
 2. **Gates and associates** observations against predicted track priors using Mahalanobis distance.
 3. **Computes** the EKF innovation in range/bearing space, including bearing-residual normalization.
 4. **Updates** matched track state and covariance using the Kalman gain.
 5. **Advances** lifecycle state through `TENTATIVE -> CONFIRMED -> COASTING -> DROPPED`.
-
 Covariance is updated using the Joseph stabilized form:
-
+ 
 ```
 P = (I - KH) P (I - KH)^T + K R K^T
 ```
-
-rather than the simplified `(I - KH)P` update. This reduces finite-precision loss of covariance symmetry and positive-semidefiniteness.
-
-The estimator also exposes Normalized Innovation Squared (NIS) and Normalized Estimation Error Squared (NEES) for simulation-time consistency evaluation.
-
-Ground truth is used only by the evaluation path, never by runtime association.
-
-### What the benchmark observed
-
-```
-Raw sensor position RMSE
-        29.24 m
-           |
-           |  multi-sensor estimation
-           v
-Fused position RMSE
-        10.82 m
-
-RMSE reduction: 63%
-```
-
+ 
+rather than the simplified `(I - KH)P` update. This preserves covariance symmetry and positive-semidefiniteness under finite precision.
+ 
+The estimator exposes Normalized Innovation Squared (NIS) and Normalized Estimation Error Squared (NEES) for simulation-time consistency evaluation. Ground truth is used only by the evaluation path, never by runtime association.
+ 
+#### What the benchmark observed
+ 
+| | RMSE |
+|---|---:|
+| Raw sensor position | **29.24 m** |
+| Fused position | **10.82 m** |
+| **Reduction** | **63%** |
+ 
 The measured 63% reduction is specific to Vanguard's synthetic sensor, motion, and noise model and is not presented as a real-world radar-performance claim.
-
+ 
 ---
-
-## Track lifecycle and uncertainty
-
-Tracking is explicitly stateful.
-
-Default lifecycle thresholds are configurable, with the reference tracker using:
-
-```
-hitsToConfirm = 3
-missesToCoast = 3
-missesToDrop  = 8
-```
-
-The observation that creates a track counts as the first hit.
-
-Multiple sensors reporting at the same timestamp may all improve the state estimate, but together they count as one lifecycle observation-cycle hit, not several.
-
+ 
+### 04. Track lifecycle and uncertainty
+ 
+Tracking is explicitly stateful. Default lifecycle thresholds are configurable, with the reference tracker using:
+ 
+| Threshold | Value |
+|---|---:|
+| Hits to confirm | 3 |
+| Misses to coast | 3 |
+| Misses to drop | 8 |
+ 
+The observation that creates a track counts as the first hit. Multiple sensors reporting at the same timestamp may all improve the state estimate, but together they count as one lifecycle observation-cycle hit, not several.
+ 
 ```
                  3 consecutive observation-cycle hits
                        (default; configurable)
@@ -199,33 +182,17 @@ TENTATIVE --------------------------------------------> CONFIRMED
                                          v                                   v
                                     CONFIRMED                            DROPPED
 ```
-
-A COASTING track remains active. Its motion model predicts state forward while covariance grows to represent increasing uncertainty.
-
-When a valid observation returns, the existing canonical track can reacquire without changing identity.
-
-`PacketLossIT` verifies the sequence:
-
-```
-CONFIRMED
-    |
-three missed cycles
-    v
-COASTING
-uncertainty increases
-    |
-valid observation
-    v
-CONFIRMED
-same canonical track ID
-```
-
+ 
+A COASTING track remains active. Its motion model predicts state forward while covariance grows to represent increasing uncertainty. When a valid observation returns, the existing canonical track reacquires without changing identity.
+ 
+`PacketLossIT` verifies this sequence: a confirmed track enters COASTING after three missed cycles with growing uncertainty, then returns to CONFIRMED under the same canonical track ID when a valid observation arrives.
+ 
 ---
-
-## Failure modes and recovery evidence
-
+ 
+### 05. Failure modes and recovery evidence
+ 
 Reliability claims are tied to executable evidence rather than inferred only from architecture.
-
+ 
 | Condition | Verified behavior | Evidence |
 |---|---|---|
 | Kafka consumer restart | First consumer commits 5 of 20 records; restarted consumer receives exactly the remaining 15 and does not replay the committed 5 | `KafkaRecoveryIT` |
@@ -235,19 +202,15 @@ Reliability claims are tied to executable evidence rather than inferred only fro
 | Pipeline transport | Raw records flow through the tracking Kafka adapter to `tracks.fused`; resulting state is persisted through Redis | `PipelineIT` |
 | Repeated spatial breach | 1,000 repeated BREACH inputs produce exactly one emitted event | `FullBenchmark` |
 | Simulated packet loss | Recorded benchmark runs retained 100% association at 0%, 5%, 10%, and 20% configured loss | `docs/BENCHMARKS.md` |
-
-Packet-loss RMSE is deliberately not promoted as a headline result.
-
-Some recorded loss runs produced counterintuitive RMSE reductions, so those values remain documented for investigation rather than being presented as improvements.
-
-<!-- FAILURE / REACQUISITION GIF Only add this if the behavior can be reproduced honestly in the live system. Suggested path: docs/figures/recovery.gif Then uncomment: ![Vanguard-X coasting and reacquisition](docs/figures/recovery.gif) -->
-
+ 
+Packet-loss RMSE is deliberately not promoted as a headline result. Some recorded loss runs produced counterintuitive RMSE reductions, so those values remain documented for investigation rather than being presented as improvements.
+ 
 ---
-
-## Requirements traceability
-
-A lightweight verification map ties important system requirements to executable evidence.
-
+ 
+### 06. Requirements traceability
+ 
+A lightweight verification map ties system requirements to executable evidence.
+ 
 | ID | Requirement | Verification |
 |---|---|---|
 | REQ-TRK-01 | Position RMSE shall remain below 15 m under the frozen three-sensor benchmark workload | `FullBenchmark`: 10.86 m |
@@ -259,35 +222,35 @@ A lightweight verification map ties important system requirements to executable 
 | REQ-SYS-02 | Identical seeded replay inputs shall produce identical estimator output | `ReplayIT`: 0 replay delta |
 | REQ-EVT-01 | Repeated identical breach state shall not emit repeated entry events | `FullBenchmark`: 1,000 -> 1 |
 | REQ-PERF-01 | Tracking throughput shall exceed 20,000 reports/s at 200 targets on the frozen operational configuration | `FullBenchmark`: 21,348 reports/s |
-
+ 
 These IDs are project-level traceability identifiers, not external program or defense-system requirements.
-
+ 
 ---
-
-## Sensor interface
-
+ 
+### 07. Sensor interface
+ 
 The telemetry ingress boundary is an explicit Protobuf contract:
-
+ 
 `vanguard-protocol/src/main/proto/sensor_report.proto`
-
+ 
 ```protobuf
 message SensorReport {
     string sensor_id = 1;
     int64 timestamp_ms = 2;
-
+ 
     double sensor_x = 3;
     double sensor_y = 4;
-
+ 
     double range = 5;
     double azimuth = 6;
-
+ 
     double signal_strength = 7;
     int64 sequence_number = 8;
 }
 ```
-
+ 
 The Netty gateway decodes each report and validates it before the report enters the Kafka pipeline.
-
+ 
 | Field | Type | Meaning | Gateway validation |
 |---|---|---|---|
 | `sensor_id` | string | Sensor identity | Must be non-blank |
@@ -298,21 +261,15 @@ The Netty gateway decodes each report and validates it before the report enters 
 | `azimuth` | double | Raw bearing in radians | Must be finite and within [-2π, 2π]; normalized downstream |
 | `signal_strength` | double | Observation-quality metadata | No packet-level range restriction currently applied |
 | `sequence_number` | int64 | Per-sensor sequence metadata | Must be non-negative |
-
-The azimuth ingress envelope is intentionally permissive enough to accept one wrapped revolution in either direction.
-
-Bearing residuals are normalized downstream by the estimator before the EKF update.
-
-Malformed or invalid reports are rejected before entering the tracking stream.
-
-Additional contracts for fused tracks and spatial events live in:
-
-`vanguard-protocol/src/main/proto/`
-
+ 
+The azimuth ingress envelope is intentionally permissive enough to accept one wrapped revolution in either direction. Bearing residuals are normalized downstream by the estimator before the EKF update.
+ 
+Malformed or invalid reports are rejected before entering the tracking stream. Additional contracts for fused tracks and spatial events live in `vanguard-protocol/src/main/proto/`.
+ 
 ---
-
-## Module map
-
+ 
+### 08. Module map
+ 
 | Module | Responsibility | Scope |
 |---|---|---|
 | `vanguard-protocol` | Protobuf contracts for reports, fused tracks, and events | Interface boundary |
@@ -324,121 +281,112 @@ Additional contracts for fused tracks and spatial events live in:
 | `vanguard-ui` | React/TypeScript operational UI, MapLibre map, covariance ellipses, events, metrics | Presentation |
 | `benchmarks` | Accuracy, fusion, throughput, latency, replay, loss, and covariance evaluation | Performance/evaluation |
 | `integration-tests` | Testcontainers Kafka/Redis pipeline, restart, replay, and loss verification | System verification |
-
+ 
 The UI is decomposed into an application shell, tactical map, dashboard panels, tabs, shared UI primitives, configuration, hooks, and utilities rather than a monolithic entrypoint.
-
+ 
 ---
-
-## Benchmark methodology
-
+ 
+### 09. Benchmark methodology
+ 
 The frozen performance campaign uses:
-
-- a fixed workload and configuration;
-- warm-up before measurement;
-- a fixed send schedule;
-- repeated runs;
-- three-run medians rather than best-run selection;
-- committed raw outputs;
-- a 300 m operational spatial grid;
-- a separate 2,000 m coarse-grid ablation;
-- an in-process tracking-latency definition kept separate from live end-to-end telemetry.
-
-### Measured operational-grid throughput
-
+ 
+- a fixed workload and configuration
+- warm-up before measurement
+- a fixed send schedule
+- repeated runs
+- three-run medians rather than best-run selection
+- committed raw outputs
+- a 300 m operational spatial grid
+- a separate 2,000 m coarse-grid ablation
+- an in-process tracking-latency definition kept separate from live end-to-end telemetry
+#### Measured operational-grid throughput
+ 
 | Targets | Reports/s |
 |---:|---:|
 | 50 | 48,858 |
 | 200 | 21,348 |
 | 500 | 14,962 |
 | 1,000 | 16,696 |
-
+ 
 The measured points are reported as-is. No monotonic-scaling claim is made.
-
-### At 200 targets
-
-```
-p50  13.49 ms
-p95  18.45 ms
-p99  20.73 ms
-```
-
-The 300 m operational spatial grid outperformed the 2,000 m coarse-grid configuration at every measured target count in the frozen benchmark.
-
-Both configurations use the spatial index; the comparison isolates spatial-grid granularity rather than indexing versus no indexing.
-
+ 
+#### At 200 targets
+ 
+| Percentile | Latency |
+|---|---:|
+| p50 | 13.49 ms |
+| p95 | 18.45 ms |
+| p99 | 20.73 ms |
+ 
+The 300 m operational spatial grid outperformed the 2,000 m coarse-grid configuration at every measured target count in the frozen benchmark. Both configurations use the spatial index; the comparison isolates spatial-grid granularity rather than indexing versus no indexing.
+ 
 See [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md) for the full methodology, coarse-grid comparison, limitations, and performance-engineering experiments.
-
+ 
 ---
-
-## Verification and CI
-
+ 
+### 10. Verification and CI
+ 
 The repository uses:
-
-- **JUnit 5** for estimation, association, lifecycle, gateway, and spatial logic;
-- **Testcontainers** with real Kafka and Redis for integration verification;
-- **GitHub Actions** for build and integration gates;
-- **CodeQL** static analysis;
-- **CycloneDX** SBOM generation;
-- Production **Docker image** builds and Compose smoke testing.
-
+ 
+- **JUnit 5** for estimation, association, lifecycle, gateway, and spatial logic
+- **Testcontainers** with real Kafka and Redis for integration verification
+- **GitHub Actions** for build and integration gates
+- **CodeQL** static analysis
+- **CycloneDX** SBOM generation
+- Production **Docker image** builds and Compose smoke testing
 The CI pipeline is treated as part of the engineering evidence rather than presentation-only infrastructure.
-
+ 
 ---
-
-## Observability
-
+ 
+### 11. Observability
+ 
 Runtime telemetry is exposed through Micrometer/Prometheus and visualized in both Grafana and the operator UI.
-
+ 
 Live telemetry includes ingest throughput, track counts, end-to-end p99 latency, Kafka lag, gateway drops, Redis persistence pressure, component health, and spatial events.
-
-<!-- OBSERVABILITY SCREENSHOT Recommended screenshot: Vanguard Analytics tab or Grafana dashboard Suggested path: docs/figures/live-analytics.png Then uncomment: ![Vanguard-X live telemetry dashboard](docs/figures/live-analytics.png) -->
-
+ 
 The UI deliberately separates live telemetry from the frozen benchmark snapshot so transient runtime values are never presented as the measured 20.73 ms in-process benchmark result.
-
+ 
 ---
-
-## Documentation
-
+ 
+### 12. Documentation
+ 
 Deeper design and verification material lives under `docs/`:
-
-- [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md) -- frozen performance and correctness results
-- [`docs/architecture/`](docs/architecture/) -- architecture decisions and tradeoffs
-- [`docs/mathematics/`](docs/mathematics/) -- estimator and association notes
-- [`docs/performance/`](docs/performance/) -- performance methodology and experiments
-- [`docs/reliability/`](docs/reliability/) -- loss, replay, and failure models
-- [`docs/security/`](docs/security/) -- security-related engineering notes
-- [`docs/interview-talking-points.md`](docs/interview-talking-points.md) -- concise technical discussion notes
-
+ 
+- [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md) - frozen performance and correctness results
+- [`docs/architecture/`](docs/architecture/) - architecture decisions and tradeoffs
+- [`docs/mathematics/`](docs/mathematics/) - estimator and association notes
+- [`docs/performance/`](docs/performance/) - performance methodology and experiments
+- [`docs/reliability/`](docs/reliability/) - loss, replay, and failure models
+- [`docs/security/`](docs/security/) - security-related engineering notes
+- [`docs/interview-talking-points.md`](docs/interview-talking-points.md) - concise technical discussion notes
 ---
-
-## Known limitations
-
+ 
+### 13. Known limitations
+ 
 - **Nearest-neighbour association.** The current association model can fail in dense or ambiguous multi-target conditions. JPDA/MHT are deferred.
 - **Runtime estimator selection.** The frozen full-system baseline uses the constant-velocity EKF. An IMM implementation has been evaluated separately but has not been promoted to the default runtime tracker.
 - **Single-host deployment.** The reference deployment uses Docker Compose rather than Kubernetes or a distributed production topology.
 - **Single Redis instance.** A production deployment would require replicated or clustered state infrastructure.
 - **Internal transport security.** Development paths do not currently use TLS.
 - **External basemap dependency.** The UI uses an external ArcGIS raster basemap; offline or self-hosted map tiles are not bundled.
-
 These are explicit scope boundaries, not hidden production claims.
-
+ 
 ---
-
-## Quick start
-
-### Requirements
-
+ 
+### 14. Quick start
+ 
+#### Requirements
+ 
 - Docker
 - Docker Compose
-
-### Start the complete reference stack:
-
+#### Start the complete reference stack:
+ 
 ```bash
 docker compose up --build
 ```
-
-### Services:
-
+ 
+#### Services
+ 
 | Service | URL |
 |---|---|
 | Operator UI | `http://localhost:3000` |
@@ -447,34 +395,34 @@ docker compose up --build
 | Prometheus | `http://localhost:9090` |
 | Grafana | `http://localhost:3001` |
 | UDP ingest | `:5000/udp` |
-
+ 
 The production UI proxies `/api/*` and `/ws/*` through nginx, so browser-side code does not require a separate backend hostname or port.
-
-### Stop cleanly:
-
+ 
+#### Stop cleanly:
+ 
 ```bash
 docker compose down --remove-orphans
 ```
-
-### Run module-level verification:
-
+ 
+#### Run module-level verification:
+ 
 ```bash
 mvn clean verify -pl '!integration-tests'
 mvn verify -pl integration-tests -am
 ```
-
-### Build the frontend:
-
+ 
+#### Build the frontend:
+ 
 ```bash
 cd vanguard-ui
 npm ci
 npm run build
 ```
-
+ 
 ---
-
-## Built with
-
+ 
+### ⚙️ technologies:
+ 
 <p align="center">
   <a href="https://skillicons.dev">
     <img src="https://skillicons.dev/icons?i=java,spring,kafka,redis,docker,react,ts,prometheus,grafana,nginx&theme=dark" alt="Tech stack" />
@@ -483,10 +431,8 @@ npm run build
 <p align="center">
   <sub>+ Netty · Protobuf · MapLibre · Micrometer · CycloneDX</sub>
 </p>
-
-
-
-
-## License
-
+ 
+### 15. License
+ 
 Released under the [MIT License](LICENSE).
+ 
