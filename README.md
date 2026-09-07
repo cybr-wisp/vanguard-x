@@ -23,31 +23,32 @@ Vanguard fuses asynchronous, noisy range/bearing reports into a single track pic
 > **Scope:** Vanguard-X is an educational, simulated, unclassified software project. Sensors, trajectories, measurements, and geofences are synthetic. It is not an operational combat, targeting, or weapon-control system.
 
 ---
-### Contents:
-- [01. Measured results](#measured-results)
-- [02. Architecture](#architecture)
+ 
+### Contents
+ 
+- [01. Measured results](#01-measured-results)
+- [02. Architecture](#02-architecture)
   - [Simulation](#simulation)
   - [Operator UI](#operator-ui)
-- [03. How sensor fusion works](#how-sensor-fusion-works)
-- [04. Track lifecycle and uncertainty](#track-lifecycle-and-uncertainty)
-- [05. Failure modes and recovery evidence](#failure-modes-and-recovery-evidence)
-- [06. Requirements traceability](#requirements-traceability)
-- [07. Sensor interface](#sensor-interface)
-- [08. Module map](#module-map)
-- [09. Benchmark methodology](#benchmark-methodology)
-- [10. Verification and CI](#verification-and-ci)
-- [11. Observability](#observability)
-- [12. Documentation](#documentation)
-- [13. Known limitations](#known-limitations)
-- [14. Quick start](#quick-start)
-- [15. License](#license)
-
-----
-
+- [03. How sensor fusion works](#03-how-sensor-fusion-works)
+- [04. Track lifecycle and uncertainty](#04-track-lifecycle-and-uncertainty)
+- [05. Failure modes and recovery evidence](#05-failure-modes-and-recovery-evidence)
+- [06. Requirements traceability](#06-requirements-traceability)
+- [07. Sensor interface](#07-sensor-interface)
+- [08. Module map](#08-module-map)
+- [09. Benchmark methodology](#09-benchmark-methodology)
+- [10. Verification and CI](#10-verification-and-ci)
+- [11. Observability](#11-observability)
+- [12. Documentation](#12-documentation)
+- [13. Known limitations](#13-known-limitations)
+- [14. Quick start](#14-quick-start)
+- [15. License](#15-license)
+---
+ 
 ### 01. Measured results
-
+ 
 All values below are from the frozen benchmark campaign with a fixed workload, fixed configuration, and committed raw outputs.
-
+ 
 | Category | Metric | Result |
 |---|---|---:|
 | Tracking | Position RMSE | **10.86 m** |
@@ -66,42 +67,41 @@ All values below are from the frozen benchmark campaign with a fixed workload, f
 | Latency | p99 at 200 targets | **20.73 ms** |
 | Determinism | Replay max RMSE delta | **0** |
 | Eventing | 1,000 repeated BREACH inputs | **1 emitted event** |
-
+ 
 **Benchmark environment:** Eclipse Temurin JDK 21.0.12.1, 8-core host, three runs per measured point, median reported. The primary configuration uses the 300 m operational spatial grid. Backend, frontend, and Docker services were stopped for the in-process tracking benchmark.
-
+ 
 > **Latency scope:** the 13.49 / 18.45 / 20.73 ms figures measure **in-process tracking workload latency**, not full UDP-to-browser end-to-end latency.
-
+ 
 Raw benchmark outputs are committed under [`benchmarks/results/optimized-three-run/`](benchmarks/results/optimized-three-run/). Full methodology, ablations, and limitations are documented in [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md).
-
+ 
 ---
-
+ 
 ### 02. Architecture
-
+ 
 Vanguard is organized around explicit transport, tracking, state, spatial-event, and presentation boundaries.
-
+ 
 Kafka provides replayable stream boundaries between ingestion and processing. Redis holds current track state for low-latency access. The Spring Boot API exposes live track, event, and health streams to the frontend without embedding tracking logic in the presentation layer.
-
+ 
 ![Vanguard-X architecture](docs/architecture/architecture_diagram.png)
-
+ 
 The reference Docker Compose deployment packages the backend runtime into `vanguard-api`, while the Maven modules preserve the internal subsystem boundaries.
-
+ 
 #### Simulation
-
+ 
 The world simulator generates deterministic target trajectories and feeds them through three independent sensor models, each with configurable range noise, bearing bias, and update rate. A network impairment layer applies packet loss, jitter, and reordering before reports hit the UDP ingress, so the tracking pipeline never sees clean data.
-
+ 
 **All randomness is seeded. The same seed produces the same measurement sequence, which is what makes replay verification and frozen benchmarks possible.**
-
+ 
 #### Operator UI
-
+ 
 The React/TypeScript frontend connects over WebSocket and renders:
-
+ 
 - **Tactical map** - live track positions, heading vectors, and covariance uncertainty ellipses on a MapLibre basemap
 - **Event panel** - stateful geofence transitions as they fire
 - **Analytics dashboard** - ingest throughput, active track count, end-to-end latency, Kafka lag, and component health
 - **Track inspector** - per-track state, lifecycle phase, and estimation metadata
-
 Live telemetry is kept visually separate from frozen benchmark results so transient runtime values are never confused with measured performance.
-
+ 
 <p align="center">
   <img src="docs/assets/vanguard_overview.png" width="49%" alt="Overview">
   <img src="docs/assets/vanguard-analytics.png" width="49%" alt="Live Analytics">
@@ -110,15 +110,8 @@ Live telemetry is kept visually separate from frozen benchmark results so transi
   <img src="docs/assets/vanguard-benchmarks.png" width="49%" alt="Benchmarks">
   <img src="docs/assets/vanguard-events.png" width="49%" alt="Events">
 </p>
-
-<p align="center">
-  <img src="docs/assets/vanguard-benchmarks.png" width="49%" alt="Benchmarks">
-  <img src="docs/assets/vanguard-events.png" width="49%" alt="Events">
-</p>
-
 https://github.com/user-attachments/assets/4a31fb7a-12ea-4c3e-a767-808e7b79ae57
-
----
+ 
 ---
  
 ### 03. How sensor fusion works
@@ -421,18 +414,6 @@ npm run build
  
 ---
  
-### ⚙️ technologies:
- 
-<p align="center">
-  <a href="https://skillicons.dev">
-    <img src="https://skillicons.dev/icons?i=java,spring,kafka,redis,docker,react,ts,prometheus,grafana,nginx&theme=dark" alt="Tech stack" />
-  </a>
-</p>
-<p align="center">
-  <sub>+ Netty · Protobuf · MapLibre · Micrometer · CycloneDX</sub>
-</p>
- 
 ### 15. License
  
 Released under the [MIT License](LICENSE).
- 
