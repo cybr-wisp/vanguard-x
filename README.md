@@ -21,6 +21,9 @@ Then replace this comment with:
 ![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.3-6DB33F?logo=springboot&logoColor=white)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
+
+![Vanguard-X demo](docs/assets/vanguard-1.gif)
+
 Vanguard-X is a Java 21 multi-sensor tracking and state-estimation system built around UDP telemetry, Protobuf contracts, Kafka event streams, an Extended Kalman Filter, Redis live state, stateful geofencing, and a React/MapLibre operational UI.
 
 > **Scope:** Vanguard-X is an educational, simulated, unclassified software project. Sensors, trajectories, measurements, and geofences are synthetic. It is not an operational combat, targeting, or weapon-control system.
