@@ -2,14 +2,15 @@ package com.vanguard.gateway;
 
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Tracks the highest observed sequence number per sensor. Used to detect:
  *   - Duplicates: sequence <= last seen
  *   - Gaps: sequence > last seen + 1 (logged, not rejected)
  *
- * Thread-safe: one instance shared across the Netty event loop (single-
- * threaded per channel) and any downstream handoff.
+ * Thread-safe: updates for each sensor are performed atomically through
+ * ConcurrentMap.compute().
  */
 public class SequenceTracker {
 
@@ -21,35 +22,44 @@ public class SequenceTracker {
     public enum SequenceVerdict { ACCEPT, DUPLICATE, GAP_THEN_ACCEPT }
 
     /**
-     * Check a new report's sequence number against the sensor's history.
-     * Returns the verdict. GAP_THEN_ACCEPT means there was a gap but the
-     * report is still accepted (gaps are informational, not fatal).
+     * Atomically check a new report's sequence number against the sensor's
+     * history. GAP_THEN_ACCEPT means there was a gap but the report is still
+     * accepted (gaps are informational, not fatal).
      */
     public SequenceVerdict check(String sensorId, long sequenceNumber) {
-        SensorState current = state.get(sensorId);
+        AtomicReference<SequenceVerdict> verdict = new AtomicReference<>();
 
-        if (current == null) {
-            // First report from this sensor
-            state.put(sensorId, new SensorState(sequenceNumber, 0, 0));
-            return SequenceVerdict.ACCEPT;
-        }
+        state.compute(sensorId, (ignored, current) -> {
+            if (current == null) {
+                verdict.set(SequenceVerdict.ACCEPT);
+                return new SensorState(sequenceNumber, 0, 0);
+            }
 
-        if (sequenceNumber <= current.highestSeq()) {
-            // Duplicate or replay
-            state.put(sensorId, new SensorState(
-                    current.highestSeq(),
-                    current.duplicateCount() + 1,
-                    current.gapCount()));
-            return SequenceVerdict.DUPLICATE;
-        }
+            if (sequenceNumber <= current.highestSeq()) {
+                verdict.set(SequenceVerdict.DUPLICATE);
+                return new SensorState(
+                        current.highestSeq(),
+                        current.duplicateCount() + 1,
+                        current.gapCount()
+                );
+            }
 
-        boolean hasGap = sequenceNumber > current.highestSeq() + 1;
-        state.put(sensorId, new SensorState(
-                sequenceNumber,
-                current.duplicateCount(),
-                current.gapCount() + (hasGap ? 1 : 0)));
+            boolean hasGap = sequenceNumber > current.highestSeq() + 1;
 
-        return hasGap ? SequenceVerdict.GAP_THEN_ACCEPT : SequenceVerdict.ACCEPT;
+            verdict.set(
+                    hasGap
+                            ? SequenceVerdict.GAP_THEN_ACCEPT
+                            : SequenceVerdict.ACCEPT
+            );
+
+            return new SensorState(
+                    sequenceNumber,
+                    current.duplicateCount(),
+                    current.gapCount() + (hasGap ? 1 : 0)
+            );
+        });
+
+        return verdict.get();
     }
 
     /** Get the number of duplicates detected for a sensor. */
