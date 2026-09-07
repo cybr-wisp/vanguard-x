@@ -102,7 +102,7 @@ export function MapView({
         type: 'raster',
         source: 'reference',
         paint: {
-          'raster-opacity': 0.94,
+          'raster-opacity': 0,
         },
       },
     ]
