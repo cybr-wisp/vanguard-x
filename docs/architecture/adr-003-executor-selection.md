@@ -2,7 +2,7 @@
 
 ## Status
 
-Open experiment — no production winner is claimed.
+Open experiment — no controlled concurrent executor winner is claimed.
 
 ## Context
 
@@ -21,7 +21,7 @@ A benchmark harness exists for comparing:
 1. bounded fixed-worker executors
 2. Java 21 virtual-thread-per-task executors
 
-The repository does not currently contain a completed controlled executor benchmark that justifies declaring either configuration the production winner.
+The repository does not currently contain a frozen controlled concurrent executor benchmark that exercises multiple in-flight tracking work units and measures scaling, queue growth, and saturation.
 
 ## Current decision
 
@@ -41,16 +41,16 @@ The frozen indexed benchmark reports:
 
 | Targets | Throughput |
 |---:|---:|
-| 50 | 35,728 reports/s |
-| 200 | 18,546 reports/s |
-| 500 | 12,485 reports/s |
-| 1,000 | 9,771 reports/s |
+| 50 | 48,858 reports/s |
+| 200 | 21,348 reports/s |
+| 500 | 14,962 reports/s |
+| 1,000 | 16,696 reports/s |
 
 At 200 targets, indexed in-process tracking latency is:
 
-- p50: 16.74 ms
-- p95: 23.92 ms
-- p99: 37.72 ms
+- p50: 13.49 ms
+- p95: 18.45 ms
+- p99: 20.73 ms
 
 These values characterize the existing tracking implementation. They are not executor-comparison results.
 
