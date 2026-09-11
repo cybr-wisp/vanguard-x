@@ -36,7 +36,7 @@ Example:
 ## Event-time ordering
 
 Reports are processed in event-time (observation timestamp) order, not
-arrival order. This ensures that the tracker sees the same temporal
+arrival order. This preserves the same temporal
 sequence regardless of whether the reports were jittered, reordered,
 or batched during the original run.
 

@@ -132,8 +132,6 @@ This is an explicit reference-deployment tradeoff: it avoids the additional ackn
 
 The current local deployment uses replication factor 1, so changing to `acks=all` alone would not provide multi-broker durability without first changing the broker topology and replication configuration.
 
-This ADR does **not** claim exactly-once delivery.
-
 ---
 
 ## Consumer offset semantics
@@ -202,8 +200,6 @@ Replay consumers should use:
 Deterministic estimator replay is verified separately by `ReplayIT`, which confirms identical estimator state and covariance for identical seeded measurements.
 
 Kafka offset recovery is verified separately by `KafkaRecoveryIT`, which demonstrates that a restarted consumer resumes after an explicitly committed offset.
-
-These tests verify specific replay and recovery properties. They do not imply transactional exactly-once processing for the complete pipeline.
 
 ---
 

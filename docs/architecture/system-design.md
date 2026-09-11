@@ -82,11 +82,11 @@ Tracking / Spatial ----+
                        +-- PostGIS --- historical persistence (spatial queries over time)
 ```
 
-The API is a serving layer that reads from Redis and PostGIS. It does not own persistence. This separation ensures the API can be restarted or scaled independently without affecting state durability.
+The API is a serving layer that reads from Redis and PostGIS. It does not own persistence. This separation allows the API to be restarted or scaled independently while state remains owned by the persistence layer.
 
 ### Delivery semantics
 
-Gateway assigns each accepted report a `(sensor_id, sequence_number)` identity. Kafka processing uses at-least-once delivery. Downstream operations are idempotent with respect to this identity; duplicate observations are detected before state mutation. The system therefore targets effectively-once state updates rather than claiming end-to-end exactly-once processing.
+Gateway assigns each accepted report a `(sensor_id, sequence_number)` identity. Kafka processing uses at-least-once delivery. Duplicate observations are suppressed where identity-aware handling is implemented before state mutation. The pipeline therefore relies on explicit duplicate handling rather than transactional end-to-end exactly-once processing.
 
 ## Data Flow
 
