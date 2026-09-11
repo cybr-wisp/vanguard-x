@@ -31,7 +31,7 @@ Real radar and sensor systems transmit over UDP because telemetry is time-sensit
 
 ### Protobuf over JSON for wire format
 
-At 10,000+ messages/second, serialization overhead matters. Protobuf produces compact binary payloads with faster encode/decode than text-based formats. Generated message types reduce runtime parsing ambiguity and provide a versionable binary contract across modules. The actual payload reduction compared to equivalent JSON will be measured in the benchmark suite.
+At 10,000+ messages/second, serialization overhead matters. Protobuf provides a compact binary representation, generated message types, and a versionable contract across modules. This repository does not retain a controlled JSON-versus-Protobuf serialization benchmark, so no comparative throughput or payload-size claim is made here.
 
 Three schemas define the system's data model:
 - `SensorReport` -- raw noisy radar observation (range, azimuth) from a single sensor
@@ -44,9 +44,9 @@ Kafka is introduced at boundaries where durability, replay, independent scaling,
 
 - `raw-tracks` between gateway and tracking: decouples network I/O from state estimation, enables replay of historical sensor data by resetting consumer offsets, provides durability and failure recovery for accepted observations
 - `filtered-tracks` between tracking and spatial: allows independent scaling of the geofence evaluator, provides backpressure visibility through consumer lag
-- `alerts` between spatial and API: ensures alert events survive API restarts
+- `alerts` between spatial and API: decouples alert production from API consumption and allows retained Kafka events to be consumed after an API restart
 
-Not every inter-module boundary uses Kafka. Direct method calls or in-process handoffs are used where the overhead of a message broker is unjustified. The local development environment uses Kafka in KRaft mode (no ZooKeeper dependency).
+Not every inter-module boundary uses Kafka. Direct method calls or in-process handoffs are used where the overhead of a message broker is unjustified. The local development environment uses a single Kafka broker coordinated by ZooKeeper.
 
 **Stateful tracking constraint:** Although Kafka permits multiple consumers per group, the V1 tracking stage operates as a single logical stateful processor. Multi-target data association requires visibility across all candidate tracks, so naively partitioning raw observations across independent tracking workers could produce inconsistent associations. Horizontal partitioning of the tracker requires an explicit spatial partitioning and track-handoff strategy and is deferred beyond V1. Other stateless or independently partitionable stages, such as spatial evaluation, may scale horizontally.
 
@@ -122,12 +122,10 @@ vanguard-api
 vanguard-ui
 ```
 
-See `architecture.svg` for the full visual diagram.
-
 ## Consequences
 
 - Every module can be tested in isolation by stubbing its Kafka topics
-- Kafka in KRaft mode eliminates the ZooKeeper dependency for local development
+- The local reference deployment uses a single Kafka broker coordinated by ZooKeeper
 - The EKF implementation must handle the nonlinear polar-to-Cartesian observation model; Jacobian computation uses double precision throughout
 - Protobuf schema changes require recompilation of `vanguard-protocol` and all downstream modules
 - Redis is an additional infrastructure dependency but eliminates the need for custom spatial data structures
