@@ -57,8 +57,7 @@ clutter marker.
    misconfigured.
 
 2. **Degradation conditions.** Sweep noise levels and document where
-   RMSE grows rapidly. This is honest engineering, not cherry-picking
-   the best result.
+   RMSE grows rapidly, indicating degradation outside the validated operating range.
 
 3. **Association breaks under density.** When targets are very close
    together, nearest-neighbour association may assign observations to

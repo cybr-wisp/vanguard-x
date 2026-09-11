@@ -176,11 +176,7 @@ The benchmark also evaluates tracking under simulated packet loss at:
 
 Association accuracy remained 100% in the recorded benchmark runs.
 
-The packet-loss RMSE values are intentionally not used as headline performance
-claims because the observed RMSE decreases under several packet-loss
-conditions. This counterintuitive behavior requires further analysis of the
-evaluation methodology before those RMSE results are interpreted as tracking
-improvements.
+The packet-loss runs produced lower RMSE at several non-zero loss levels, so those measurements are tracked separately from the primary accuracy baseline. A follow-up experiment is needed to determine whether the change is caused by sample selection, lifecycle behavior, measurement timing, or estimator dynamics.
 
 The benchmark also recorded concurrent duplicate-track behavior that warrants
 additional investigation before being promoted as a headline metric.
@@ -270,8 +266,7 @@ short-lived arrays efficiently through young-generation allocation, while
 manual reuse replaced cheap allocation with repeated full-array clearing and
 additional memory writes. Cache behavior, JIT optimization, or other runtime
 effects may also have contributed. Because the rejected variant was not
-re-profiled independently, no single mechanism is claimed as the proven root
-cause.
+re-profiled independently, the available measurements do not isolate a single root cause.
 
 **Decision: rejected.**
 
@@ -308,6 +303,4 @@ sensor-fusion RMSE improvement, 18,546 reports/s at 200 targets with spatial
 indexing, 23.92 ms p95 and 37.72 ms p99 in-process processing latency, and
 deterministic replay with zero RMSE delta across repeated executions.**
 
-These results characterize the controlled synthetic benchmark workload. They
-should not be interpreted as production hardware, real-radar, or full
-sensor-to-UI performance measurements.
+These results characterize the controlled synthetic benchmark environment and are not measurements of production hardware, real radar systems, or end-to-end deployed performance.
