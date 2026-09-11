@@ -11,9 +11,6 @@ import java.util.*;
  */
 public class AlertStateMachine {
 
-    /**
-     * Composite key for per-track, per-zone state.
-     */
     private record StateKey(String trackId, String zoneId) {}
 
     private final Map<StateKey, ZoneClassification> currentState = new HashMap<>();
@@ -43,9 +40,6 @@ public class AlertStateMachine {
                 previous, newClassification, px, py));
     }
 
-    /**
-     * Determine the event type from a state transition.
-     */
     private TrackEvent.EventType determineEventType(ZoneClassification from,
                                                       ZoneClassification to) {
         if (to == ZoneClassification.BREACH && from != ZoneClassification.BREACH) {
@@ -62,20 +56,13 @@ public class AlertStateMachine {
         return null;
     }
 
-    /**
-     * Get the current classification for a track/zone pair.
-     */
     public ZoneClassification getCurrentState(String trackId, String zoneId) {
         return currentState.getOrDefault(new StateKey(trackId, zoneId), ZoneClassification.CLEAR);
     }
 
-    /**
-     * Remove state for a dropped track (cleanup).
-     */
     public void removeTrack(String trackId) {
         currentState.entrySet().removeIf(e -> e.getKey().trackId().equals(trackId));
     }
 
-    /** Number of tracked (track, zone) pairs. */
     public int getStateCount() { return currentState.size(); }
 }

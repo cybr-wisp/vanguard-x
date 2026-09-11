@@ -6,8 +6,7 @@ A standard Kalman filter requires linear observation and motion models.
 Vanguard's sensors report **range and bearing**, not Cartesian positions.
 The mapping from state to measurement contains `sqrt` and `atan2`, which
 are nonlinear. The EKF linearizes this mapping at each step via the
-Jacobian, making it a genuine engineering requirement rather than a
-name-drop.
+Jacobian, which is required by the nonlinear measurement model.
 
 ## Notation
 
@@ -106,10 +105,9 @@ finite differences in `EstimationTest.jacobianMatchesNumerical`.
 
 5. **Covariance update:**
 
-       P_{k|k} = (I - K * H) * P_{k|k-1}
+       P_{k|k} = (I - K H) P_{k|k-1} (I - K H)^T + K R K^T
 
-   After update, P is symmetrized: P = (P + P^T) / 2 to prevent
-   numerical drift.
+   Vanguard uses the Joseph stabilized covariance update to improve numerical stability and preserve positive semidefiniteness. The resulting covariance is then symmetrized to limit floating-point asymmetry.
 
 ## Sensor-specific R
 
@@ -126,10 +124,7 @@ explicit logic.
 ## Coasting behavior
 
 During coasting (no observations received), only the predict step runs.
-Each prediction increases covariance because Q is added. This is correct:
-the filter honestly reports that it knows less about a track it has not
-observed recently. The growing covariance is visible as a larger uncertainty
-ellipse in the UI.
+Each prediction adds process noise Q, increasing state uncertainty during missed observations. The corresponding covariance growth is rendered as a larger uncertainty ellipse in the UI.
 
 ## Implementation notes
 

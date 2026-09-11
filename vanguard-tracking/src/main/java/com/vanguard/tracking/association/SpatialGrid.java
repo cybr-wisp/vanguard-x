@@ -30,17 +30,11 @@ public class SpatialGrid {
         this.cellSize = cellSize;
     }
 
-    /**
-     * Clear the grid for a new processing cycle.
-     */
     public void clear() {
         grid.clear();
         positions.clear();
     }
 
-    /**
-     * Insert a track's predicted position into the grid.
-     */
     public void insert(String trackId, double px, double py) {
         long key = cellKey(px, py);
         grid.computeIfAbsent(key, k -> new ArrayList<>()).add(trackId);
@@ -67,16 +61,10 @@ public class SpatialGrid {
         return result;
     }
 
-    /**
-     * Get the number of occupied cells (for diagnostics).
-     */
     public int getOccupiedCells() {
         return grid.size();
     }
 
-    /**
-     * Get the total number of indexed tracks.
-     */
     public int getTrackCount() {
         return positions.size();
     }

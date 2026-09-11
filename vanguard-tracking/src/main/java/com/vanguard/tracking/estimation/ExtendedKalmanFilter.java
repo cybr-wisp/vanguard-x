@@ -211,8 +211,8 @@ public class ExtendedKalmanFilter {
     public double nees(
             SimpleMatrix truthState
     ) {
-        if (truthState.numRows() != 4 ||
-                truthState.numCols() != 1) {
+        if (truthState.getNumRows() != 4 ||
+                truthState.getNumCols() != 1) {
             throw new IllegalArgumentException(
                     "truthState must be 4x1"
             );
@@ -273,11 +273,11 @@ public class ExtendedKalmanFilter {
         }
 
         for (int row = 0;
-             row < solution.numRows();
+             row < solution.getNumRows();
              row++) {
 
             for (int col = 0;
-                 col < solution.numCols();
+                 col < solution.getNumCols();
                  col++) {
 
                 if (!Double.isFinite(

@@ -52,9 +52,6 @@ public class EventRepository {
         return redis.opsForHash().entries(RedisKeySchema.eventKey(eventId));
     }
 
-    /**
-     * Get the most recent N events (summaries).
-     */
     public List<String> getRecentEvents(int count) {
         List<String> all = redis.opsForList().range(RedisKeySchema.recentEventsKey(), 0, -1);
         if (all == null) return List.of();

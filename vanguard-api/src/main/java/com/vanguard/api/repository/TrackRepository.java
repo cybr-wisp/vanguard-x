@@ -20,9 +20,6 @@ public class TrackRepository {
         this.redis = redis;
     }
 
-    /**
-     * Update a track's live state in Redis.
-     */
     public void updateTrack(String trackId, double px, double py,
                              double vx, double vy, String state,
                              double uncertainty, long lastUpdateMs) {
@@ -54,9 +51,6 @@ public class TrackRepository {
         redis.expire(trailKey, Duration.ofSeconds(RedisKeySchema.TRAIL_TTL));
     }
 
-    /**
-     * Remove a dropped track from the active set and geo index.
-     */
     public void removeTrack(String trackId) {
         redis.opsForSet().remove(RedisKeySchema.activeTracksKey(), trackId);
         redis.opsForGeo().remove(RedisKeySchema.geoTracksKey(), trackId);
@@ -64,24 +58,15 @@ public class TrackRepository {
         redis.delete(RedisKeySchema.trailKey(trackId));
     }
 
-    /**
-     * Get current state of one track.
-     */
     public Map<Object, Object> getTrack(String trackId) {
         return redis.opsForHash().entries(RedisKeySchema.trackKey(trackId));
     }
 
-    /**
-     * Get all active track IDs.
-     */
     public Set<String> getActiveTrackIds() {
         Set<String> ids = redis.opsForSet().members(RedisKeySchema.activeTracksKey());
         return ids == null ? Set.of() : ids;
     }
 
-    /**
-     * Get all active tracks with their state.
-     */
     public List<Map<String, String>> getAllActiveTracks() {
         Set<String> ids = getActiveTrackIds();
         List<Map<String, String>> tracks = new ArrayList<>();
@@ -97,9 +82,6 @@ public class TrackRepository {
         return tracks;
     }
 
-    /**
-     * Get the recent trail for a track.
-     */
     public List<String> getTrail(String trackId) {
         List<String> trail = redis.opsForList().range(RedisKeySchema.trailKey(trackId), 0, -1);
         return trail == null ? List.of() : trail;

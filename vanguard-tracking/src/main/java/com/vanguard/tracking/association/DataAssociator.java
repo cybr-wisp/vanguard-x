@@ -38,10 +38,6 @@ public class DataAssociator {
     }
 
     public DataAssociator() { this(new MahalanobisGate(), 2_000.0); }
-
-    /**
-     * Result of an association attempt for one observation.
-     */
     public sealed interface AssociationResult {
 
         record Associated(
@@ -442,10 +438,13 @@ public class DataAssociator {
     }
 
     /**
-     * Hungarian algorithm for rectangular minimum-cost assignment.
+     * Hungarian algorithm for rectangular minimum-cost assignment using
+     * row/column potentials and augmenting paths.
      *
      * Requires rows <= columns. associateBatch guarantees this by adding
      * dummy unassociated columns.
+     *
+     * Algorithm family: Kuhn-Munkres / Hungarian assignment method.
      *
      * @return assigned column for every row
      */

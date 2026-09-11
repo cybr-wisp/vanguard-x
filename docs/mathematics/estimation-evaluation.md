@@ -93,4 +93,4 @@ mvn -B -pl vanguard-tracking test "-Dtest=EstimationHardeningTest"
 
 The frozen full-system benchmark remains the existing EKF baseline so historical benchmark numbers are not silently invalidated.
 
-The IMM is implemented and evaluated as an estimator option. Promoting it to the default full-system tracker requires a new frozen full-system benchmark campaign.
+The IMM is implemented and evaluated as an alternative estimator. The live tracking pipeline currently uses the Extended Kalman Filter; IMM results in this document come from controlled estimator evaluation rather than the production tracking path. Promoting IMM to the default full-system tracker would require a new frozen full-system benchmark campaign.

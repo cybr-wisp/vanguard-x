@@ -140,7 +140,6 @@ public class TrackManager {
         Map<Integer, AssociationResult> results =
                 associator.associateBatch(measurements, sensorModel, candidates);
 
-
         List<SimpleMatrix> unassociatedMeasurements =
                 new ArrayList<>();
 
@@ -897,7 +896,6 @@ public class TrackManager {
         };
     }
 
-    /** Remove dropped tracks from memory. */
     public void pruneDropped() {
         tracks.entrySet().removeIf(e -> e.getValue().getState() == TrackState.DROPPED);
     }

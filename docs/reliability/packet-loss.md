@@ -43,9 +43,7 @@ The frozen benchmark campaign reports:
 | 10% | 7.48 m | 100.0% | 1 | 7 | 1 | 2 |
 | 20% | 7.72 m | 100.0% | 1 | 9 | 1 | 2 |
 
-The lower RMSE at non-zero loss should not be interpreted as packet loss
-improving the estimator. The workload is small and deterministic, and packet
-loss changes which measurements contribute to the evaluated trajectory.
+The lower RMSE observed at non-zero loss is treated as a measurement anomaly. A controlled follow-up experiment is needed to determine whether the change is caused by sample selection, lifecycle behavior, measurement timing, or estimator dynamics.
 
 The benchmark measures observed tracking behavior under the stated workload;
 it does not establish a general packet-loss tolerance limit.
@@ -55,8 +53,7 @@ it does not establish a general packet-loss tolerance limit.
 A packet-loss campaign using the full 22-target reference scenario has not
 yet been frozen as a committed benchmark artifact.
 
-Until that experiment is run, Vanguard does not claim that the results above
-generalize to the denser reference workload.
+Until that follow-up experiment is completed, the packet-loss RMSE values remain observational results rather than evidence of improved estimator accuracy.
 
 ## Why this matters
 

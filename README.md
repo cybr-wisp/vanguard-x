@@ -361,7 +361,6 @@ Deeper design and verification material lives under `docs/`:
 - [`docs/performance/`](docs/performance/) - performance methodology and experiments
 - [`docs/reliability/`](docs/reliability/) - loss, replay, and failure models
 - [`docs/security/`](docs/security/) - security-related engineering notes
-- [`docs/interview-talking-points.md`](docs/interview-talking-points.md) - concise technical discussion notes
 ---
  
 ### 13. Known limitations

@@ -10,7 +10,7 @@ import org.ejml.simple.SimpleMatrix;
  *   theta = atan2(py - sy, px - sx)
  *
  * This mapping is nonlinear (sqrt, atan2), which is why the EKF is
- * a real engineering requirement rather than a buzzword.
+ * required by the nonlinear range/bearing measurement model.
  *
  * The EKF linearizes h(x) around the predicted state via the Jacobian H.
  */
