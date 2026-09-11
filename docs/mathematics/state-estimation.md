@@ -48,7 +48,7 @@ Sensor j at position (s_x, s_y) reports range r and bearing theta:
 
 This mapping is nonlinear (square root, atan2), which is why a standard
 Kalman filter is insufficient and the Extended Kalman Filter is a real
-engineering requirement rather than a buzzword.
+requirement imposed by the nonlinear measurement model.
 
 ## Jacobian of the measurement model
 
@@ -95,16 +95,12 @@ shows the region of uncertainty around the estimated position. A larger
 covariance means the track is less certain, not merely less accurate.
 
 During coasting (no observations), the covariance grows with each prediction
-step. This is correct behavior: the filter is honestly reporting that it
-knows less about a track it has not observed recently.
+step. This reflects the expected increase in state uncertainty during missed observations.
 
 ## Why range/bearing observations matter
 
 If the simulator emitted clean Cartesian (x, y) positions, the observation
-model would be linear and a standard Kalman filter would suffice. Using
-range/bearing forces the nonlinear measurement model and makes the EKF
-a genuine engineering requirement. This is the difference between a
-project that name-drops Kalman filtering and one that actually needs it.
+model would be linear and a standard Kalman filter would suffice. Range/bearing observations produce a nonlinear measurement model, requiring EKF linearization during each update.
 
 ## Trajectory model
 
