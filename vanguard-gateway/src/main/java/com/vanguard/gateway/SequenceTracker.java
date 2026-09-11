@@ -62,19 +62,16 @@ public class SequenceTracker {
         return verdict.get();
     }
 
-    /** Get the number of duplicates detected for a sensor. */
     public long getDuplicateCount(String sensorId) {
         SensorState s = state.get(sensorId);
         return s == null ? 0 : s.duplicateCount();
     }
 
-    /** Get the number of gaps detected for a sensor. */
     public long getGapCount(String sensorId) {
         SensorState s = state.get(sensorId);
         return s == null ? 0 : s.gapCount();
     }
 
-    /** Reset all state (testing only). */
     public void reset() {
         state.clear();
     }

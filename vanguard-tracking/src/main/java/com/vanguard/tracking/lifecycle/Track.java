@@ -55,10 +55,6 @@ public class Track {
             lastUpdateMs = timeMs;
         }
     }
-
-    /**
-     * Update the track with a new observation and advance lifecycle.
-     */
     public void update(SimpleMatrix measurement, MeasurementModel sensorModel,
                        String sensorId, long observationMs) {
         // Predict to observation time first

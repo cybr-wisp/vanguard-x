@@ -38,10 +38,6 @@ public class DataAssociator {
     }
 
     public DataAssociator() { this(new MahalanobisGate(), 2_000.0); }
-
-    /**
-     * Result of an association attempt for one observation.
-     */
     public sealed interface AssociationResult {
 
         record Associated(
