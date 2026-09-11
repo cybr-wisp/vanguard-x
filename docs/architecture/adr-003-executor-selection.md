@@ -2,11 +2,11 @@
 
 ## Status
 
-Open experiment — no controlled concurrent executor winner is claimed.
+Open experiment.
 
 ## Context
 
-The tracking stage performs CPU-heavy work:
+The tracking stage performs primarily CPU-bound work:
 
 - EKF state estimation
 - Mahalanobis gating
@@ -14,28 +14,37 @@ The tracking stage performs CPU-heavy work:
 - spatial candidate search
 - lifecycle processing
 
-Netty handles UDP I/O independently on its event loop. Tracking currently executes synchronously in the dedicated Kafka tracking-consumer thread.
+Netty handles UDP I/O independently on its event loop. The tracking pipeline currently processes Kafka records synchronously in the dedicated tracking-consumer thread.
 
-A benchmark harness exists for comparing:
+Two executor models are candidates for future parallelization:
 
-1. bounded fixed-worker executors
-2. Java 21 virtual-thread-per-task executors
+1. bounded fixed-worker executor
+2. Java 21 virtual-thread-per-task executor
 
-The repository does not currently contain a frozen controlled concurrent executor benchmark that exercises multiple in-flight tracking work units and measures scaling, queue growth, and saturation.
+The existing benchmark suite measures the current tracking implementation but does not yet provide a controlled concurrent comparison of these executor models under multiple in-flight tracking workloads.
 
-## Current decision
+## Decision
 
-Keep the simple dedicated tracking-consumer execution model until a controlled executor campaign demonstrates a measurable benefit from additional parallelism.
+Retain the dedicated tracking-consumer execution model until executor parallelism demonstrates a measurable improvement under a controlled benchmark.
 
-This avoids presenting an unmeasured concurrency choice as a performance result.
+A future comparison should measure:
 
-## Why virtual threads are not assumed to win
+- throughput
+- p50, p95, and p99 latency
+- CPU utilization
+- Kafka consumer lag
+- executor queue growth
+- saturation behavior
 
-Virtual threads reduce the cost of large numbers of blocking tasks. They do not create additional CPU execution capacity.
+## Executor considerations
 
-The tracking hot path is dominated by CPU work rather than blocking I/O, so fixed-pool versus virtual-thread selection must be based on measured throughput, tail latency, queue behavior, and CPU utilization.
+Virtual threads reduce scheduling overhead for large numbers of blocking tasks but do not increase available CPU capacity.
 
-## Existing full-system evidence
+Because the tracking hot path is predominantly CPU-bound, executor selection depends on measured scaling and saturation behavior rather than task-creation cost alone.
+
+A bounded fixed-worker executor may provide more explicit control over CPU concurrency and queue growth. A virtual-thread executor may still be useful if future pipeline stages introduce significant blocking I/O.
+
+## Current benchmark baseline
 
 The frozen indexed benchmark reports:
 
@@ -52,17 +61,21 @@ At 200 targets, indexed in-process tracking latency is:
 - p95: 18.45 ms
 - p99: 20.73 ms
 
-These values characterize the existing tracking implementation. They are not executor-comparison results.
+These measurements establish the baseline for evaluating future executor changes.
 
-## Saturation signal
+## Saturation indicators
 
-For the current implementation, sustained Kafka consumer lag is the clearest leading saturation indicator. If a bounded worker executor is introduced later, sustained queue growth would provide an additional leading signal.
+For the current synchronous consumer model, sustained Kafka consumer lag is the primary saturation indicator.
 
-A numerical executor-specific saturation point will only be documented after a controlled load campaign measures it.
+If a bounded executor is introduced, queue depth and queue growth should also be monitored. Executor changes should be evaluated against the existing frozen workload using the same benchmark environment and input seeds.
 
-## Consequences
+## Revisit criteria
 
-- no unsupported fixed-versus-virtual winner
-- frozen benchmark claims remain unchanged
-- executor parallelization remains an explicit future experiment
-- changes to concurrency require a new benchmark artifact
+Revisit this decision when one of the following occurs:
+
+- Kafka consumer lag becomes sustained under the target workload
+- tracking latency exceeds the benchmark envelope
+- blocking work is introduced into the tracking path
+- profiling identifies exploitable parallelism in the tracking stage
+
+Any executor change should include a reproducible benchmark artifact comparing the new configuration against the current baseline.
